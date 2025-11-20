@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPi Flight Tracker</title>
+
+    <!-- 1. Leaflet.js CSS and JS (for the map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <!-- 2. Leaflet.RotatedMarker JS (to show plane heading) -->
+    <script src="https://unpkg.com/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.js"></script>
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        header {
+            background-color: #333;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1001; /* Above map */
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+
+        #content-wrapper {
+            display: flex;
+            flex: 1; /* Grow to fill available space */
+            height: calc(100% - 60px); /* Full height minus header */
+        }
+
+        #map {
+            height: 100%;
+            flex: 3; /* Map takes 3/4 of the width */
+            border-right: 2px solid #ccc;
+        }
+
+        #timeline {
+            height: 100%;
+            flex: 1; /* Timeline takes 1/4 of the width */
+            background-color: #fff;
+            overflow-y: auto;
+            box-shadow: -3px 0 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+
+        #timeline-header {
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #eee;
+            position: sticky;
+            top: 0;
+        }
+
+        #timeline-header h2 {
+            margin: 0;
+            color: #444;
+        }
+
+        #timeline-header p {
+            margin: 5px 0 0;
+            color: #777;
+            font-size: 0.9em;
+        }
+
+        .flight-entry {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.2s;
+        }
+
+        .flight-entry:hover {
+            background-color: #fdfdfd;
+        }
+
+        .flight-entry strong {
+            font-size: 1.2em;
+            color: #005a9c;
+            display: block;
+        }
+
+        .flight-entry .details {
+            font-size: 0.9em;
+            color: #555;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        /* Leaflet popup customization */
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+        }
+        .leaflet-popup-content {
+            font-size: 1.1em;
+            line-height: 1.4;
+        }
+        .leaflet-popup-content strong {
+            color: #005a9c;
+        }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Live Flight Tracker</h1>
+    </header>
+
+    <div id="content-wrapper">
+        <!-- The Map -->
+        <div id="map"></div>
+
+        <!-- The Timeline -->
+        <aside id="timeline">
+            <div id="timeline-header">
+                <h2>Nearby Flights</h2>
+                <p id="flight-count">Fetching data...</p>
+            </div>
+            <div id="timeline-list">
+                <!-- Flight entries will be inserted here by JS -->
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        // --- Config ---
+        // These values are passed in from the Flask server
+        const MY_LAT = 60.3172;
+        const MY_LON = 24.9633;
+
+        // const MY_LAT = 60.3172;
+        // const MY_LON = 24.9633;
+        const REFRESH_INTERVAL_MS = 15000; // 15 seconds
+
+        // --- State ---
+        let map;
+        let planeMarkers = {}; // Store markers by icao24 to update/remove them
+        let planeIcon;
+
+        /**
+         * Converts meters/second to knots
+         */
+        function msToKnots(ms) {
+            if (!ms) return 0;
+            return Math.round(ms * 1.94384);
+        }
+
+        /**
+         * Converts meters to feet
+         */
+        function metersToFeet(m) {
+            if (!m) return 0;
+            return Math.round(m * 3.28084);
+        }
+
+        /**
+         * Creates the custom plane icon
+         */
+        function createPlaneIcon() {
+            // Using an inline SVG for the plane icon. No external files needed.
+            const iconSvg = `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                     width="28" height="28"
+                     style="fill: #003366; stroke: #ffffff; stroke-width: 0.5px; opacity: 0.9;
+                            transform: rotate(var(--icon-rotation, 0deg));
+                            transform-origin: center;
+                            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));">
+                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+                </svg>`;
+
+            return L.divIcon({
+                html: iconSvg,
+                className: '', // No default Leaflet styles
+                iconSize: [28, 28],
+                iconAnchor: [14, 14], // Center of the icon
+            });
+        }
+
+        /**
+         * Creates or updates a plane marker on the map
+         */
+        function updateMap(planes) {
+            const seenPlanes = new Set();
+
+            planes.forEach(plane => {
+                seenPlanes.add(plane.icao24);
+                const pos = [plane.lat, plane.lon];
+                const heading = plane.heading || 0;
+
+                // Popup content
+                const popupContent = `
+                    <strong>${plane.callsign}</strong><br>
+                    Altitude: ${metersToFeet(plane.altitude_m)} ft<br>
+                    Speed: ${msToKnots(plane.velocity_ms)} knots<br>
+                    Heading: ${Math.round(heading)}°
+                `;
+
+                if (planeMarkers[plane.icao24]) {
+                    // Plane exists, update its position and rotation
+                    planeMarkers[plane.icao24]
+                        .setLatLng(pos)
+                        .setRotationAngle(heading)
+                        .setPopupContent(popupContent);
+                } else {
+                    // New plane, create a marker
+                    const marker = L.marker(pos, {
+                        icon: planeIcon,
+                        rotationAngle: heading,
+                    })
+                    .bindPopup(popupContent)
+                    .addTo(map);
+
+                    planeMarkers[plane.icao24] = marker;
+                }
+
+                // This is a hack to update the SVG's rotation inside the divIcon
+                // We set a CSS variable that the inline SVG uses.
+                const iconEl = planeMarkers[plane.icao24]._icon;
+                if (iconEl) {
+                    iconEl.style.setProperty('--icon-rotation', `${heading}deg`);
+                }
+            });
+
+            // Remove markers for planes that are no longer in the area
+            Object.keys(planeMarkers).forEach(icao24 => {
+                if (!seenPlanes.has(icao24)) {
+                    map.removeLayer(planeMarkers[icao24]);
+                    delete planeMarkers[icao24];
+                }
+            });
+        }
+
+        /**
+         * Updates the timeline list on the right
+         */
+        function updateTimeline(planes) {
+            const listEl = document.getElementById('timeline-list');
+            const countEl = document.getElementById('flight-count');
+
+            if (planes.length === 0) {
+                countEl.textContent = 'No flights detected in the area.';
+                listEl.innerHTML = '';
+                return;
+            }
+
+            countEl.textContent = `Tracking ${planes.length} flight(s):`;
+
+            // Sort planes by altitude (highest first)
+            planes.sort((a, b) => (b.altitude_m || 0) - (a.altitude_m || 0));
+
+            let html = '';
+            planes.forEach(plane => {
+                html += `
+                    <div class="flight-entry">
+                        <strong>${plane.callsign}</strong>
+                        <div class="details">
+                            <span>Alt: ${metersToFeet(plane.altitude_m)} ft</span>
+                            <span>Spd: ${msToKnots(plane.velocity_ms)} knots</span>
+                        </div>
+                    </div>
+                `;
+            });
+            listEl.innerHTML = html;
+        }
+
+        /**
+         * Main function to fetch data and update UI
+         */
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/flights');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const planes = await response.json();
+
+                updateMap(planes);
+                updateTimeline(planes);
+
+            } catch (error) {
+                console.error("Error fetching flight data:", error);
+                document.getElementById('flight-count').textContent = 'Error fetching data.';
+            }
+        }
+
+        /**
+         * Initializes the application
+         */
+        function init() {
+            // 1. Create the custom icon
+            planeIcon = createPlaneIcon();
+
+            // 2. Initialize the map
+            map = L.map('map').setView([MY_LAT, MY_LON], 9); // Zoom level 9
+
+            // 3. Add map tiles (OpenStreetMap is free)
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(map);
+
+            // 4. Add a marker for "home"
+            L.marker([MY_LAT, MY_LON]).addTo(map)
+                .bindPopup('Your Location')
+                .openPopup();
+
+            // 5. Start the data refresh loop
+            fetchData(); // Fetch immediately on load
+            setInterval(fetchData, REFRESH_INTERVAL_MS);
+        }
+
+        // Run the app once the document is ready
+        document.addEventListener('DOMContentLoaded', init);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+https://www.flightradar24.com/v1/search/web/find?query=BAW531&limit=1&type=live
+
+
+// match by call-sign and extract schd_from and schd_to
+{
+    "results": [
+        {
+            "id": "3cd1e174",
+            "label": "BA531 / BAW531 / A320 (G-EUUP)",
+            "detail": {
+                "lat": 51.5,
+                "lon": -0.1,
+                "schd_from": "SPU",
+                "schd_to": "LHR",
+                "ac_type": "A320",
+                "route": "Split (SPU) ⟶ London (LHR)",
+                "logo": "https://cdn.flightradar24.com/assets/airlines/logotypes/5.png",
+                "reg": "G-EUUP",
+                "callsign": "BAW531",
+                "flight": "BA531",
+                "operator": "BAW",
+                "operator_id": 5
+            },
+            "type": "live",
+            "match": "begins"
+        }
+    ],
+    "stats": {
+        "total": 1,
+        "count": 1
+    }
+}
+
+- create a game
+- if you touch an airplane you can guess either where it's coming from
+  or where it's going to depending on which one is Helsinki
+- bento box:
+  - next plane passing overhead in ... minutes
