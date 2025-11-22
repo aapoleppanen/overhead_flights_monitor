@@ -106,14 +106,16 @@ def fetch_flight_details(callsign):
 
                         # Game Logic: If destination is local (Vantaa/Helsinki), use origin as the target
                         game_city = destination
+                        origin_display = origin
                         if destination and ("Vantaa" in destination or "Helsinki" in destination):
                             game_city = origin
+                            origin_display = "Hidden" # Hide origin if it becomes the answer
 
                         return {
                             "destination": game_city,
                             "real_destination": destination,
                             "model": model,
-                            "origin": origin
+                            "origin": origin_display
                         }
     except Exception as e:
         print(f"Error resolving {callsign}: {e}")
@@ -257,15 +259,51 @@ def api_users(username):
 def api_scores():
     """
     Handle score saving and loading.
+    Returns both global high scores and user statistics.
     """
     if request.method == 'GET':
         try:
+            # 1. Global High Scores
+            high_scores = []
             if os.path.exists(SCORES_FILE):
                 with open(SCORES_FILE, 'r') as f:
                     content = f.read()
                     if content:
-                        return jsonify(json.loads(content))
-            return jsonify([])
+                        high_scores = json.loads(content)
+
+            # 2. User Stats
+            user_stats = []
+            if os.path.exists(USERS_FILE):
+                try:
+                    with open(USERS_FILE, 'r') as f:
+                        content = f.read()
+                        if content:
+                            users_dict = json.loads(content)
+                            # Calculate performance stats
+                            for u in users_dict.values():
+                                games = u.get('games_played', 0)
+                                total = u.get('total_score', 0)
+
+                                # Assuming approx 1000 max points per game (200 * 5 rounds)
+                                # This is an estimate for "historical percentage"
+                                percentage = 0
+                                if games > 0:
+                                    # Max potential score is roughly 1000 per game
+                                    percentage = int((total / (games * 1000)) * 100)
+                                    percentage = min(100, max(0, percentage)) # Clamp 0-100
+
+                                u['performance_percent'] = percentage
+                                user_stats.append(u)
+
+                            # Sort users by best score (descending)
+                            user_stats.sort(key=lambda x: x.get('best_score', 0), reverse=True)
+                except Exception as e:
+                    print(f"Error reading user stats: {e}")
+
+            return jsonify({
+                "high_scores": high_scores,
+                "user_stats": user_stats
+            })
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 

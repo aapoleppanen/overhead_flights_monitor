@@ -1,12 +1,14 @@
 [Unit]
-Description=Flight Monitor Service
+Description=Flight Monitor Backend
 After=network.target
 
 [Service]
 User=pi
 WorkingDirectory=/home/pi/overhead_flights_monitor
-ExecStart=/home/pi/overhead_flights_monitor/.venv/bin/python server.py
+# Using the venv python
+ExecStart=/home/pi/overhead_flights_monitor/.venv/bin/python server_opensky.py
 Restart=always
+# Environment variables can be set here
 Environment=MY_LAT=60.3172
 Environment=MY_LON=24.9633
 

@@ -388,7 +388,10 @@
     <div id="login-modal" class="overlay-bg">
         <div class="glass-panel modal" style="text-align: center;">
             <h2>Identify Yourself</h2>
-            <input type="text" id="username-input" placeholder="Enter Pilot Name" style="width: 100%; padding: 15px; margin-bottom: 20px; border-radius: 10px; border: none;">
+            <input type="text" id="username-input" list="user-list" placeholder="Enter Pilot Name" style="width: 100%; padding: 15px; margin-bottom: 20px; border-radius: 10px; border: none;">
+            <datalist id="user-list">
+                <!-- Populated via JS -->
+            </datalist>
             <button class="btn" onclick="startGame()">Start Engine</button>
             <button class="btn btn-secondary" onclick="document.getElementById('login-modal').style.display='none'" style="margin-top: 10px;">Cancel</button>
         </div>
@@ -532,7 +535,16 @@
                 if (res.ok) {
                     const details = await res.json();
                     document.getElementById('info-model').textContent = details.model || "Unknown";
-                    document.getElementById('info-origin').textContent = details.origin || p.origin_country;
+
+                    const originText = details.origin || p.origin_country;
+                    const originEl = document.getElementById('info-origin');
+                    originEl.textContent = originText;
+                    if (originText === "Hidden") {
+                        originEl.style.filter = "blur(4px)";
+                    } else {
+                        originEl.style.filter = "none";
+                    }
+
                     const destEl = document.getElementById('info-dest');
                     const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
 
@@ -564,8 +576,24 @@
 
         // --- Game Logic ---
 
-        function startGamePrompt() {
+        async function startGamePrompt() {
             document.getElementById('login-modal').style.display = 'flex';
+
+            // Fetch existing users for autocomplete
+            try {
+                const res = await fetch('/api/scores');
+                const data = await res.json();
+                const users = data.user_stats || [];
+                const datalist = document.getElementById('user-list');
+                datalist.innerHTML = '';
+                users.forEach(u => {
+                    const option = document.createElement('option');
+                    option.value = u.name;
+                    datalist.appendChild(option);
+                });
+            } catch (e) {
+                console.error("Failed to load users for dropdown", e);
+            }
         }
 
         async function startGame() {
@@ -679,6 +707,10 @@
         }
 
         function guessCity(city, btnElement) {
+            // Disable all buttons to prevent spamming
+            const buttons = document.querySelectorAll('.guess-btn');
+            buttons.forEach(b => b.style.pointerEvents = 'none');
+
             const timeTaken = (Date.now() - roundStartTime) / 1000;
             const timeBonus = Math.max(0, Math.round(100 - (timeTaken * 2))); // Lose 2 pts per second
 
@@ -688,22 +720,45 @@
                 document.getElementById('current-score').textContent = currentScore;
                 flashFeedback(true);
                 btnElement.style.background = "var(--success)";
-                setTimeout(nextRound, 1000);
+                revealInfo();
+                setTimeout(nextRound, 1500);
             } else {
                 flashFeedback(false);
                 btnElement.style.background = "var(--danger)";
                 // Show correct one
-                const buttons = document.querySelectorAll('.guess-btn');
                 buttons.forEach(b => {
                     if (b.textContent === currentTargetPlane.resolvedDestination) b.style.background = "var(--success)";
                 });
-                setTimeout(gameOver, 1500); // Game over on wrong guess? Or just next round? Prompt implied fail state.
-                // Let's treat wrong guess as game over for high stakes, or just 0 points.
-                // User said "There should not be an alert on correct or wrong."
-                // "There should always be 5 flights". This implies continuing even if wrong.
-                // So we continue.
-                setTimeout(nextRound, 1500);
+                revealInfo();
+                setTimeout(nextRound, 2000);
             }
+        }
+
+        function revealInfo() {
+             // Show the hidden info in the panel
+             const destEl = document.getElementById('info-dest');
+             const originEl = document.getElementById('info-origin');
+
+             // If dest was hidden (most likely)
+             if (destEl.textContent === "HIDDEN") {
+                 destEl.textContent = currentTargetPlane.resolvedDestination;
+                 destEl.style.filter = "none";
+                 destEl.style.color = "var(--success)";
+             }
+
+             // If origin was hidden (game logic swap)
+             if (originEl.textContent === "HIDDEN") {
+                 originEl.textContent = currentTargetPlane.resolvedDestination; // In swapped mode, destination IS the answer (which is origin physically)
+                 // Wait, if we swapped, resolvedDestination IS the correct answer.
+                 // And the correct answer was hidden.
+                 // So simply revealing the hidden element with the correct answer text is enough.
+                 // But wait, we need the original text.
+                 // We don't store original text easily here?
+                 // Actually resolvedDestination IS the answer. So just showing that is correct.
+                 originEl.textContent = currentTargetPlane.resolvedDestination;
+                 originEl.style.filter = "none";
+                 originEl.style.color = "var(--success)";
+             }
         }
 
         function flashFeedback(isCorrect) {
@@ -733,6 +788,15 @@
             });
             const stats = await res.json();
 
+            // Submit global score
+            try {
+                await fetch('/api/scores', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name: currentUser, score: currentScore })
+                });
+            } catch(e) { console.error(e); }
+
             document.getElementById('user-stats').innerHTML = `
                 <strong>Pilot: ${stats.name}</strong><br>
                 Games Played: ${stats.games_played}<br>
@@ -755,12 +819,43 @@
             document.getElementById('game-overlay').style.display = 'flex';
             document.getElementById('game-over-ui').style.display = 'none';
             document.getElementById('scoreboard-ui').style.display = 'block';
-            // Could show top users here instead? For now keeping score list.
-            const res = await fetch('/api/scores');
-            const scores = await res.json();
-            document.getElementById('scoreboard').innerHTML = scores.map((s, i) => `
-                <div class="score-row"><span>#${i + 1} ${s.name}</span><span>${s.score}</span></div>
-            `).join('') || '<div style="padding:20px">No scores yet</div>';
+
+            try {
+                const res = await fetch('/api/scores');
+                const data = await res.json();
+
+                let html = '';
+
+                // 1. Top Scores
+                html += '<h3 style="border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:5px; color:var(--accent); margin-bottom:10px;">High Scores</h3>';
+                if (data.high_scores && data.high_scores.length > 0) {
+                    html += data.high_scores.map((s, i) => `
+                        <div class="score-row"><span>#${i + 1} ${s.name}</span><span>${s.score}</span></div>
+                    `).join('');
+                } else {
+                    html += '<div style="padding:10px; color:#aaa;">No scores yet</div>';
+                }
+
+                // 2. Pilot Rankings
+                html += '<h3 style="border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:5px; color:var(--accent); margin-top:20px; margin-bottom:10px;">Pilot Rankings</h3>';
+                html += '<div style="display:flex; justify-content:space-between; color:#888; font-size:0.8rem; margin-bottom:5px; padding:0 5px;"><span>Pilot</span><span>Best (Perf)</span></div>';
+
+                if (data.user_stats && data.user_stats.length > 0) {
+                    html += data.user_stats.map((u, i) => `
+                        <div class="score-row">
+                            <span>${i + 1}. ${u.name}</span>
+                            <span>${u.best_score} <span style="color:#666; font-size:0.8em;">(${u.performance_percent}%)</span></span>
+                        </div>
+                    `).join('');
+                } else {
+                     html += '<div style="padding:10px; color:#aaa;">No pilots yet</div>';
+                }
+
+                document.getElementById('scoreboard').innerHTML = html;
+            } catch (e) {
+                console.error("Error loading scores:", e);
+                document.getElementById('scoreboard').innerHTML = '<div style="padding:20px; color:red;">Error loading scores</div>';
+            }
         }
 
         function closeOverlay() { document.getElementById('game-overlay').style.display = 'none'; }
