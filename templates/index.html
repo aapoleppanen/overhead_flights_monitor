@@ -1,337 +1,773 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RPi Flight Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Vantaa FlightRadar24</title>
 
-    <!-- 1. Leaflet.js CSS and JS (for the map) -->
+    <!-- Leaflet & Plugins -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin=""/>
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin=""></script>
-
-    <!-- 2. Leaflet.RotatedMarker JS (to show plane heading) -->
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://unpkg.com/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.js"></script>
 
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+
     <style>
-        html, body {
-            height: 100%;
+        :root {
+            --bg-dark: #0f172a;
+            --glass-bg: rgba(15, 23, 42, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.3);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --success: #4ade80;
+            --danger: #f87171;
+            --target: #fbbf24;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f0f0f0;
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-            overflow: hidden; /* Prevent scrolling */
-        }
-
-        header {
-            background-color: #333;
-            color: white;
-            padding: 10px 20px;
-            text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            z-index: 1001; /* Above map */
-        }
-
-        header h1 {
-            margin: 0;
-            font-size: 1.5em;
-        }
-
-        #content-wrapper {
-            display: flex;
-            flex: 1; /* Grow to fill available space */
-            height: calc(100% - 60px); /* Full height minus header */
         }
 
         #map {
-            height: 100%;
-            flex: 3; /* Map takes 3/4 of the width */
-            border-right: 2px solid #ccc;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 0;
+            background: #0f172a;
         }
 
-        #timeline {
-            height: 100%;
-            flex: 1; /* Timeline takes 1/4 of the width */
-            background-color: #fff;
-            overflow-y: auto;
-            box-shadow: -3px 0 10px rgba(0,0,0,0.1);
-            z-index: 1000;
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
         }
 
-        #timeline-header {
-            padding: 15px;
-            background-color: #f9f9f9;
-            border-bottom: 1px solid #eee;
-            position: sticky;
-            top: 0;
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            pointer-events: auto;
+            transition: background-color 0.3s, transform 0.3s ease, opacity 0.3s ease;
         }
 
-        #timeline-header h2 {
+        /* Feedback Animations */
+        @keyframes flash-green { 0% { background-color: var(--success); } 100% { background-color: var(--glass-bg); } }
+        @keyframes flash-red { 0% { background-color: var(--danger); } 100% { background-color: var(--glass-bg); } }
+
+        .flash-success { animation: flash-green 0.5s ease-out; }
+        .flash-error { animation: flash-red 0.5s ease-out; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 25px;
+        }
+
+        h1 {
             margin: 0;
-            color: #444;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
         }
 
-        #timeline-header p {
-            margin: 5px 0 0;
-            color: #777;
-            font-size: 0.9em;
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 5px 12px;
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent);
+            border-radius: 20px;
+            border: 1px solid rgba(56, 189, 248, 0.2);
         }
 
-        .flight-entry {
-            padding: 12px 15px;
-            border-bottom: 1px solid #eee;
-            transition: background-color 0.2s;
+        /* Bottom Left Controls */
+        .bottom-controls {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
         }
 
-        .flight-entry:hover {
-            background-color: #fdfdfd;
+        .control-btn {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--glass-border);
+            color: var(--text-muted);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
         }
 
-        .flight-entry strong {
-            font-size: 1.2em;
-            color: #005a9c;
-            display: block;
+        .control-btn:hover {
+            background: var(--accent);
+            color: #000;
         }
 
-        .flight-entry .details {
-            font-size: 0.9em;
-            color: #555;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 5px;
-            margin-top: 8px;
+        /* Right Sidebar */
+        #right-sidebar {
+            position: absolute;
+            top: 90px;
+            right: 20px;
+            width: 300px;
+            bottom: 100px;
+            pointer-events: none;
         }
 
-        /* Leaflet popup customization */
-        .leaflet-popup-content-wrapper {
-            border-radius: 8px;
-        }
-        .leaflet-popup-content {
-            font-size: 1.1em;
-            line-height: 1.4;
-        }
-        .leaflet-popup-content strong {
-            color: #005a9c;
+        #timeline, #plane-info-panel {
+            width: 100%;
+            max-height: 100%;
+            overflow-y: auto;
+            position: absolute;
+            top: 0; right: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
         }
 
+        #timeline { opacity: 1; transform: translateX(0); pointer-events: auto; }
+        #plane-info-panel {
+            opacity: 0; transform: translateX(20px); pointer-events: none;
+            padding: 20px; display: flex; flex-direction: column; gap: 10px;
+        }
+
+        .show-info #timeline { opacity: 0; transform: translateX(20px); pointer-events: none; }
+        .show-info #plane-info-panel { opacity: 1; transform: translateX(0); pointer-events: auto; }
+
+        .panel-close {
+            position: absolute;
+            top: 10px; right: 10px;
+            background: transparent; border: none;
+            color: var(--text-muted); cursor: pointer; font-size: 1.2rem;
+        }
+
+        .flight-card {
+            padding: 15px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .flight-card:hover { background: rgba(255, 255, 255, 0.08); border-color: var(--accent); }
+        .flight-card strong { display: block; font-size: 1.1rem; color: var(--accent); margin-bottom: 4px; }
+        .flight-info { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); }
+
+        /* Game Controls */
+        #game-controls {
+            position: absolute;
+            bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 15px; z-index: 20;
+        }
+
+        .btn {
+            background: var(--accent); color: #000; border: none;
+            padding: 15px 30px; font-size: 1.1rem; font-weight: 600;
+            border-radius: 30px; cursor: pointer;
+            box-shadow: 0 0 20px var(--accent-glow); transition: transform 0.1s;
+            pointer-events: auto;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1); color: white;
+            box-shadow: none; border: 1px solid var(--glass-border);
+        }
+
+        /* Game Panels (Left) */
+        #game-panels-left {
+            position: absolute;
+            top: 90px; left: 20px; width: 300px;
+            display: none; flex-direction: column; gap: 20px;
+            pointer-events: none;
+        }
+
+        #game-guess-panel, #game-score-panel { padding: 20px; text-align: center; pointer-events: auto; }
+
+        .compass-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+
+        .guess-btn {
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--glass-border);
+            color: white;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1rem;
+        }
+        .guess-btn:hover { background: var(--accent); color: black; box-shadow: 0 0 15px var(--accent-glow); }
+
+        /* Overlays */
+        .overlay-bg {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6); z-index: 1400;
+            display: none; align-items: center; justify-content: center;
+            pointer-events: auto;
+        }
+
+        .modal { width: 90%; max-width: 400px; padding: 25px; text-align: left; }
+        .modal h2 { margin-top: 0; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; margin-bottom: 20px; }
+
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .info-label { color: var(--text-muted); }
+        .info-val { font-weight: 600; color: var(--text-main); text-align: right; }
+
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-size: 1.1rem; }
+
+        /* Toggle Switch */
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent); }
+        input:focus + .slider { box-shadow: 0 0 1px var(--accent); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        /* Loader */
+        #loading-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg-dark); z-index: 2000;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 0.5s;
+        }
+        .plane-loader { width: 60px; height: 60px; fill: var(--accent); animation: fly 2s infinite ease-in-out; }
+        @keyframes fly {
+            0% { transform: translateX(-50px) translateY(10px) rotate(-10deg); opacity: 0; }
+            20% { opacity: 1; } 80% { opacity: 1; }
+            100% { transform: translateX(50px) translateY(-10px) rotate(10deg); opacity: 0; }
+        }
+
+        /* Icons */
+        .target-plane svg { fill: var(--target) !important; }
+
+        /* Keyboard */
+        #keyboard-overlay {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: #1e293b; padding: 20px;
+            border-top-left-radius: 20px; border-top-right-radius: 20px;
+            transform: translateY(100%); transition: transform 0.3s;
+            z-index: 1600; pointer-events: auto;
+        }
+        #keyboard-overlay.visible { transform: translateY(0); }
+        .kb-row { display: flex; justify-content: center; gap: 5px; margin-bottom: 8px; }
+        .kb-key { padding: 15px 20px; background: #334155; color: white; border-radius: 8px; border: none; font-size: 1.2rem; min-width: 40px; cursor: pointer; }
+        .kb-key:active { background: var(--accent); color: black; }
+        .kb-key.wide { flex: 1; max-width: 100px; background: var(--accent); color: black; }
+        #player-name-input { width: 100%; padding: 15px; font-size: 1.5rem; background: rgba(0, 0, 0, 0.3); border: 2px solid var(--accent); color: white; border-radius: 10px; text-align: center; margin-bottom: 20px; }
     </style>
 </head>
+
 <body>
 
-    <header>
-        <h1>Live Flight Tracker</h1>
-    </header>
+    <div id="loading-screen">
+        <svg class="plane-loader" viewBox="0 0 24 24">
+            <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
+        </svg>
+        <h2 style="margin-top: 20px; font-weight: 300;">Scanning Skies...</h2>
+    </div>
 
-    <div id="content-wrapper">
-        <!-- The Map -->
-        <div id="map"></div>
+    <div id="map"></div>
 
-        <!-- The Timeline -->
-        <aside id="timeline">
-            <div id="timeline-header">
-                <h2>Nearby Flights</h2>
-                <p id="flight-count">Fetching data...</p>
+    <div class="bottom-controls">
+        <button class="control-btn" onclick="openSettings()">⚙️</button>
+        <button class="control-btn" onclick="centerMap()">⌖</button>
+    </div>
+
+    <div id="ui-layer">
+        <header class="glass-panel">
+            <div class="header-controls">
+                <h1>Vantaa FlightRadar24</h1>
             </div>
-            <div id="timeline-list">
-                <!-- Flight entries will be inserted here by JS -->
+            <div class="status-badge" id="flight-count">0 Flights</div>
+        </header>
+
+        <div id="right-sidebar">
+            <div id="timeline" class="glass-panel"></div>
+
+            <div id="plane-info-panel" class="glass-panel">
+                <button class="panel-close" onclick="closePlaneInfo()">×</button>
+                <h2 id="info-callsign" style="margin:0 0 15px 0; color:var(--accent); border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:10px;">CALLSIGN</h2>
+
+                <div class="info-row">
+                    <span class="info-label">Model</span>
+                    <span class="info-val" id="info-model">Loading...</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Origin</span>
+                    <span class="info-val" id="info-origin">Loading...</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Category</span>
+                    <span class="info-val" id="info-category">Unknown</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Altitude</span>
+                    <span class="info-val" id="info-alt">0 ft</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Speed</span>
+                    <span class="info-val" id="info-spd">0 kts</span>
+                </div>
+                <div class="info-row" id="info-dest-row">
+                    <span class="info-label">Destination</span>
+                    <span class="info-val" id="info-dest">Unknown</span>
+                </div>
             </div>
-        </aside>
+        </div>
+
+        <div id="game-panels-left">
+            <div id="game-guess-panel" class="glass-panel">
+                <h2 style="font-size: 1rem; margin-top:0; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Round <span id="round-num">1</span>/5</h2>
+                <h2 id="game-question" style="font-size: 1.3rem; margin: 10px 0;">Where is [CALLSIGN] heading?</h2>
+                <div class="compass-container"></div>
+            </div>
+
+            <div id="game-score-panel" class="glass-panel">
+                 <div style="font-size: 1rem; color: var(--text-muted);">Current Score</div>
+                 <div style="font-size: 2rem; color: var(--accent); font-weight: bold;" id="current-score">0</div>
+                 <button class="btn btn-secondary" style="margin-top: 15px; width: 100%; padding: 10px;" onclick="quitGame()">Quit Game</button>
+            </div>
+        </div>
+
+        <div id="game-controls">
+            <button class="btn" onclick="startGamePrompt()">Play Game</button>
+            <button class="btn btn-secondary" onclick="showScores()">High Scores</button>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="overlay-bg" onclick="if(event.target === this) closeSettings()">
+        <div class="glass-panel modal">
+            <h2>Settings</h2>
+            <div class="toggle-row">
+                <span>Show Destinations</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-dest" onchange="toggleDestinations()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <button class="btn" style="width: 100%; margin-top: 10px;" onclick="closeSettings()">Close</button>
+        </div>
+    </div>
+
+    <!-- User Login Modal (Before Game) -->
+    <div id="login-modal" class="overlay-bg">
+        <div class="glass-panel modal" style="text-align: center;">
+            <h2>Identify Yourself</h2>
+            <input type="text" id="username-input" placeholder="Enter Pilot Name" style="width: 100%; padding: 15px; margin-bottom: 20px; border-radius: 10px; border: none;">
+            <button class="btn" onclick="startGame()">Start Engine</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('login-modal').style.display='none'" style="margin-top: 10px;">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="game-overlay" class="overlay-bg">
+        <div id="game-over-ui" style="display: none; text-align: center; width: 100%; max-width: 500px;" class="glass-panel modal">
+            <h1>Mission Debrief</h1>
+            <p style="font-size: 1.2rem; margin-bottom: 20px;">Final Score: <span id="final-score" style="color: var(--accent); font-weight: bold;">0</span></p>
+            <div id="user-stats" style="text-align: left; margin-bottom: 20px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 10px;">
+                <!-- Injected stats -->
+            </div>
+            <button class="btn" onclick="quitGame()">Close</button>
+        </div>
+
+        <div id="scoreboard-ui" style="display: none; width: 100%; max-width: 500px;">
+            <div id="scoreboard" class="glass-panel" style="margin: 0 auto; padding: 20px;"></div>
+            <div style="text-align: center; margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeOverlay()">Close</button>
+            </div>
+        </div>
     </div>
 
     <script>
-        // --- Config ---
-        // These values are passed in from the Flask server
-        const MY_LAT = 60.3172;
-        const MY_LON = 24.9633;
+        const MY_LAT = {{ my_lat }};
+        const MY_LON = {{ my_lon }};
+        const REFRESH_INTERVAL_MS = 10000;
 
-        // const MY_LAT = 60.3172;
-        // const MY_LON = 24.9633;
-        const REFRESH_INTERVAL_MS = 15000; // 15 seconds
-
-        // --- State ---
         let map;
-        let planeMarkers = {}; // Store markers by icao24 to update/remove them
-        let planeIcon;
+        let planeMarkers = {};
+        let currentPlanes = [];
+        let gameActive = false;
+        let currentScore = 0;
+        let currentTargetPlane = null;
+        let currentOptions = [];
+        let showDestinations = false;
+        let roundsPlayed = 0;
+        let roundStartTime = 0;
+        let currentUser = "Guest";
 
-        /**
-         * Converts meters/second to knots
-         */
-        function msToKnots(ms) {
-            if (!ms) return 0;
-            return Math.round(ms * 1.94384);
+        const BACKUP_CITIES = ["London", "Paris", "New York", "Tokyo", "Dubai", "Berlin", "Rome", "Madrid", "Helsinki", "Stockholm", "Oslo", "Copenhagen"];
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView([MY_LAT, MY_LON], 10);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 20
+            }).addTo(map);
+            L.marker([MY_LAT, MY_LON], {
+                icon: L.divIcon({
+                    html: '<div style="width:12px;height:12px;background:#38bdf8;border-radius:50%;box-shadow:0 0 10px #38bdf8;"></div>',
+                    className: '', iconSize: [12, 12]
+                })
+            }).addTo(map);
         }
 
-        /**
-         * Converts meters to feet
-         */
-        function metersToFeet(m) {
-            if (!m) return 0;
-            return Math.round(m * 3.28084);
+        function centerMap() {
+            map.setView([MY_LAT, MY_LON], 10);
         }
 
-        /**
-         * Creates the custom plane icon
-         */
-        function createPlaneIcon() {
-            // Using an inline SVG for the plane icon. No external files needed.
-            const iconSvg = `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                     width="28" height="28"
-                     style="fill: #003366; stroke: #ffffff; stroke-width: 0.5px; opacity: 0.9;
-                            transform: rotate(var(--icon-rotation, 0deg));
-                            transform-origin: center;
-                            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));">
-                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
-                </svg>`;
-
-            return L.divIcon({
-                html: iconSvg,
-                className: '', // No default Leaflet styles
-                iconSize: [28, 28],
-                iconAnchor: [14, 14], // Center of the icon
-            });
+        function createPlaneIcon(heading, isTarget) {
+            const color = isTarget ? '#fbbf24' : '#38bdf8';
+            const filter = isTarget ? 'drop-shadow(0 0 8px rgba(251,191,36,0.8))' : 'drop-shadow(0 0 5px rgba(56,189,248,0.5))';
+            const scale = isTarget ? 1.3 : 1;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" style="fill: ${color}; filter: ${filter}; transform: scale(${scale}) rotate(${heading}deg); transform-origin: center;"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
+            return L.divIcon({ html: svg, className: '', iconSize: [32, 32], iconAnchor: [16, 16] });
         }
 
-        /**
-         * Creates or updates a plane marker on the map
-         */
+        async function fetchData() {
+            try {
+                const res = await fetch('/api/flights');
+                const planes = await res.json();
+                currentPlanes = planes;
+                updateMap(planes);
+                updateTimeline(planes);
+                document.getElementById('flight-count').textContent = `${planes.length} Flights`;
+                document.getElementById('loading-screen').style.opacity = '0';
+                setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 500);
+            } catch (e) { console.error(e); }
+        }
+
         function updateMap(planes) {
-            const seenPlanes = new Set();
-
-            planes.forEach(plane => {
-                seenPlanes.add(plane.icao24);
-                const pos = [plane.lat, plane.lon];
-                const heading = plane.heading || 0;
-
-                // Popup content
-                const popupContent = `
-                    <strong>${plane.callsign}</strong><br>
-                    Altitude: ${metersToFeet(plane.altitude_m)} ft<br>
-                    Speed: ${msToKnots(plane.velocity_ms)} knots<br>
-                    Heading: ${Math.round(heading)}°
-                `;
-
-                if (planeMarkers[plane.icao24]) {
-                    // Plane exists, update its position and rotation
-                    planeMarkers[plane.icao24]
-                        .setLatLng(pos)
-                        .setRotationAngle(heading)
-                        .setPopupContent(popupContent);
+            const seen = new Set();
+            planes.forEach(p => {
+                seen.add(p.id);
+                const pos = [p.lat, p.lon];
+                const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
+                if (planeMarkers[p.id]) {
+                    const marker = planeMarkers[p.id];
+                    marker.setLatLng(pos);
+                    marker.setIcon(createPlaneIcon(p.heading, isTarget));
+                    marker.unbindPopup();
                 } else {
-                    // New plane, create a marker
-                    const marker = L.marker(pos, {
-                        icon: planeIcon,
-                        rotationAngle: heading,
-                    })
-                    .bindPopup(popupContent)
-                    .addTo(map);
-
-                    planeMarkers[plane.icao24] = marker;
-                }
-
-                // This is a hack to update the SVG's rotation inside the divIcon
-                // We set a CSS variable that the inline SVG uses.
-                const iconEl = planeMarkers[plane.icao24]._icon;
-                if (iconEl) {
-                    iconEl.style.setProperty('--icon-rotation', `${heading}deg`);
+                    const marker = L.marker(pos, { icon: createPlaneIcon(p.heading, isTarget) }).addTo(map);
+                    marker.on('click', () => openPlaneInfo(p));
+                    planeMarkers[p.id] = marker;
                 }
             });
-
-            // Remove markers for planes that are no longer in the area
-            Object.keys(planeMarkers).forEach(icao24 => {
-                if (!seenPlanes.has(icao24)) {
-                    map.removeLayer(planeMarkers[icao24]);
-                    delete planeMarkers[icao24];
-                }
+            Object.keys(planeMarkers).forEach(k => {
+                if (!seen.has(k)) { map.removeLayer(planeMarkers[k]); delete planeMarkers[k]; }
             });
         }
 
-        /**
-         * Updates the timeline list on the right
-         */
         function updateTimeline(planes) {
-            const listEl = document.getElementById('timeline-list');
-            const countEl = document.getElementById('flight-count');
+            const container = document.getElementById('timeline');
+            container.innerHTML = planes.map(p => {
+                const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
+                const borderStyle = isTarget ? 'border: 1px solid var(--target); background: rgba(251, 191, 36, 0.1);' : '';
+                let destText = "Hidden";
+                if (showDestinations) destText = p.destination ? '✈ ' + p.destination : 'Unknown Destination';
+                return `<div class="flight-card" style="${borderStyle}" onclick="openPlaneInfoId('${p.id}')">
+                    <strong>${p.callsign}</strong>
+                    <div class="flight-info"><span>${p.altitude_ft} ft</span><span>${p.velocity_kts} kts</span></div>
+                    <div style="font-size: 0.8rem; color: #aaa; margin-top: 4px;">${destText}</div>
+                </div>`;
+            }).join('');
+        }
 
-            if (planes.length === 0) {
-                countEl.textContent = 'No flights detected in the area.';
-                listEl.innerHTML = '';
+        function openPlaneInfoId(id) { const p = currentPlanes.find(x => x.id === id); if (p) openPlaneInfo(p); }
+
+        function openPlaneInfo(p) {
+            map.setView([p.lat, p.lon], 12);
+            document.getElementById('right-sidebar').classList.add('show-info');
+            document.getElementById('info-callsign').textContent = p.callsign;
+            document.getElementById('info-category').textContent = p.category || "Unknown";
+            document.getElementById('info-alt').textContent = `${p.altitude_ft} ft`;
+            document.getElementById('info-spd').textContent = `${p.velocity_kts} kts`;
+            document.getElementById('info-model').textContent = "Loading...";
+            document.getElementById('info-origin').textContent = p.origin_country || "Loading...";
+            const destEl = document.getElementById('info-dest');
+            destEl.textContent = "Resolving...";
+            destEl.style.filter = "none";
+            resolveFlightDetails(p);
+        }
+
+        async function resolveFlightDetails(p) {
+            try {
+                const res = await fetch(`/api/resolve/${p.callsign.trim()}`);
+                if (res.ok) {
+                    const details = await res.json();
+                    document.getElementById('info-model').textContent = details.model || "Unknown";
+                    document.getElementById('info-origin').textContent = details.origin || p.origin_country;
+                    const destEl = document.getElementById('info-dest');
+                    const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
+
+                    // Game Logic: Use the swapped destination if provided
+                    if (details.destination) p.resolvedDestination = details.destination;
+
+                    // UI Display Logic
+                    if (isTarget && !showDestinations) {
+                        destEl.textContent = "HIDDEN"; destEl.style.filter = "blur(4px)";
+                    } else {
+                        if (showDestinations || isTarget) {
+                             destEl.textContent = details.real_destination || details.destination || "Unknown";
+                             destEl.style.filter = "none";
+                        } else {
+                            destEl.textContent = "HIDDEN"; destEl.style.filter = "blur(4px)";
+                        }
+                    }
+                } else {
+                     document.getElementById('info-model').textContent = "Unknown";
+                     document.getElementById('info-dest').textContent = "Not Found";
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function closePlaneInfo() { document.getElementById('right-sidebar').classList.remove('show-info'); }
+        function openSettings() { document.getElementById('settings-modal').style.display = 'flex'; document.getElementById('toggle-dest').checked = showDestinations; }
+        function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
+        function toggleDestinations() { showDestinations = document.getElementById('toggle-dest').checked; updateTimeline(currentPlanes); }
+
+        // --- Game Logic ---
+
+        function startGamePrompt() {
+            document.getElementById('login-modal').style.display = 'flex';
+        }
+
+        async function startGame() {
+            const nameInput = document.getElementById('username-input').value;
+            if (!nameInput) { alert("Please enter a name!"); return; }
+            currentUser = nameInput;
+            document.getElementById('login-modal').style.display = 'none';
+
+            if (currentPlanes.length === 0) { alert("No planes nearby!"); return; }
+
+            document.getElementById('loading-screen').style.display = 'flex';
+            document.getElementById('loading-screen').style.opacity = '1';
+            document.querySelector('#loading-screen h2').textContent = "Briefing Mission...";
+
+            // Try to find at least 5 playable planes to ensure a full game
+            // Or just find one to start and find others dynamically
+            const candidates = [...currentPlanes].sort(() => 0.5 - Math.random());
+            let found = false;
+            for (let p of candidates.slice(0, 8)) {
+                try {
+                     const res = await fetch(`/api/resolve/${p.callsign.trim()}`);
+                     if (res.ok) {
+                         const details = await res.json();
+                         if (details.destination) {
+                             p.resolvedDestination = details.destination;
+                             currentTargetPlane = p;
+                             found = true;
+                             break;
+                         }
+                     }
+                } catch (e) {}
+            }
+
+            document.getElementById('loading-screen').style.display = 'none';
+            if (!found) { alert("Could not find flight data. Try again."); return; }
+
+            gameActive = true;
+            currentScore = 0;
+            roundsPlayed = 0;
+            document.getElementById('current-score').textContent = '0';
+            document.getElementById('game-controls').style.display = 'none';
+            document.getElementById('game-panels-left').style.display = 'flex';
+
+            setupRound();
+        }
+
+        async function nextRound() {
+            if (roundsPlayed >= 5) {
+                gameOver();
                 return;
             }
 
-            countEl.textContent = `Tracking ${planes.length} flight(s):`;
+            document.querySelector('#game-question').textContent = "Scanning for next flight...";
+            const candidates = [...currentPlanes].sort(() => 0.5 - Math.random());
+            let found = false;
+            for (let p of candidates.slice(0, 5)) {
+                if (p.id === currentTargetPlane.id) continue;
+                try {
+                     const res = await fetch(`/api/resolve/${p.callsign.trim()}`);
+                     if (res.ok) {
+                         const details = await res.json();
+                         if (details.destination) {
+                             p.resolvedDestination = details.destination;
+                             currentTargetPlane = p;
+                             found = true;
+                             break;
+                         }
+                     }
+                } catch (e) {}
+            }
 
-            // Sort planes by altitude (highest first)
-            planes.sort((a, b) => (b.altitude_m || 0) - (a.altitude_m || 0));
+            if (!found) {
+                alert("No more flights found! Ending game early.");
+                gameOver();
+                return;
+            }
 
-            let html = '';
-            planes.forEach(plane => {
-                html += `
-                    <div class="flight-entry">
-                        <strong>${plane.callsign}</strong>
-                        <div class="details">
-                            <span>Alt: ${metersToFeet(plane.altitude_m)} ft</span>
-                            <span>Spd: ${msToKnots(plane.velocity_ms)} knots</span>
-                        </div>
-                    </div>
-                `;
-            });
-            listEl.innerHTML = html;
+            setupRound();
         }
 
-        /**
-         * Main function to fetch data and update UI
-         */
-        async function fetchData() {
-            try {
-                const response = await fetch('/api/flights');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const planes = await response.json();
+        function setupRound() {
+            roundsPlayed++;
+            roundStartTime = Date.now();
+            document.getElementById('round-num').textContent = roundsPlayed;
 
-                updateMap(planes);
-                updateTimeline(planes);
+            // Show info panel for target
+            openPlaneInfo(currentTargetPlane);
+            updateMap(currentPlanes);
 
-            } catch (error) {
-                console.error("Error fetching flight data:", error);
-                document.getElementById('flight-count').textContent = 'Error fetching data.';
+            const correctCity = currentTargetPlane.resolvedDestination;
+            const options = new Set([correctCity]);
+            const shuffledBackups = [...BACKUP_CITIES].sort(() => 0.5 - Math.random());
+            let backupIdx = 0;
+            while (options.size < 4) {
+                const city = shuffledBackups[backupIdx++ % shuffledBackups.length];
+                if (city !== correctCity) options.add(city);
+            }
+
+            currentOptions = Array.from(options).sort(() => 0.5 - Math.random());
+            document.getElementById('game-question').textContent = `Where is ${currentTargetPlane.callsign} heading?`;
+
+            const container = document.querySelector('.compass-container');
+            container.innerHTML = '';
+            currentOptions.forEach(city => {
+                const btn = document.createElement('div');
+                btn.className = 'guess-btn';
+                btn.textContent = city;
+                btn.onclick = (e) => guessCity(city, e.target);
+                container.appendChild(btn);
+            });
+        }
+
+        function guessCity(city, btnElement) {
+            const timeTaken = (Date.now() - roundStartTime) / 1000;
+            const timeBonus = Math.max(0, Math.round(100 - (timeTaken * 2))); // Lose 2 pts per second
+
+            if (city === currentTargetPlane.resolvedDestination) {
+                const points = 100 + timeBonus;
+                currentScore += points;
+                document.getElementById('current-score').textContent = currentScore;
+                flashFeedback(true);
+                btnElement.style.background = "var(--success)";
+                setTimeout(nextRound, 1000);
+            } else {
+                flashFeedback(false);
+                btnElement.style.background = "var(--danger)";
+                // Show correct one
+                const buttons = document.querySelectorAll('.guess-btn');
+                buttons.forEach(b => {
+                    if (b.textContent === currentTargetPlane.resolvedDestination) b.style.background = "var(--success)";
+                });
+                setTimeout(gameOver, 1500); // Game over on wrong guess? Or just next round? Prompt implied fail state.
+                // Let's treat wrong guess as game over for high stakes, or just 0 points.
+                // User said "There should not be an alert on correct or wrong."
+                // "There should always be 5 flights". This implies continuing even if wrong.
+                // So we continue.
+                setTimeout(nextRound, 1500);
             }
         }
 
-        /**
-         * Initializes the application
-         */
-        function init() {
-            // 1. Create the custom icon
-            planeIcon = createPlaneIcon();
-
-            // 2. Initialize the map
-            map = L.map('map').setView([MY_LAT, MY_LON], 9); // Zoom level 9
-
-            // 3. Add map tiles (OpenStreetMap is free)
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            }).addTo(map);
-
-            // 4. Add a marker for "home"
-            L.marker([MY_LAT, MY_LON]).addTo(map)
-                .bindPopup('Your Location')
-                .openPopup();
-
-            // 5. Start the data refresh loop
-            fetchData(); // Fetch immediately on load
-            setInterval(fetchData, REFRESH_INTERVAL_MS);
+        function flashFeedback(isCorrect) {
+            const panel = document.getElementById('game-guess-panel');
+            panel.classList.remove('flash-success', 'flash-error');
+            void panel.offsetWidth; // Trigger reflow
+            panel.classList.add(isCorrect ? 'flash-success' : 'flash-error');
         }
 
-        // Run the app once the document is ready
-        document.addEventListener('DOMContentLoaded', init);
+        async function gameOver() {
+            gameActive = false;
+            currentTargetPlane = null;
+            updateMap(currentPlanes);
+            closePlaneInfo();
+
+            document.getElementById('game-panels-left').style.display = 'none';
+            document.getElementById('game-overlay').style.display = 'flex';
+            document.getElementById('game-over-ui').style.display = 'block';
+            document.getElementById('scoreboard-ui').style.display = 'none';
+            document.getElementById('final-score').textContent = currentScore;
+
+            // Submit stats automatically
+            const res = await fetch(`/api/users/${currentUser}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ score: currentScore })
+            });
+            const stats = await res.json();
+
+            document.getElementById('user-stats').innerHTML = `
+                <strong>Pilot: ${stats.name}</strong><br>
+                Games Played: ${stats.games_played}<br>
+                Best Score: ${stats.best_score}<br>
+                Total Score: ${stats.total_score}
+            `;
+        }
+
+        function quitGame() {
+            gameActive = false;
+            currentTargetPlane = null;
+            updateMap(currentPlanes);
+            closePlaneInfo();
+            document.getElementById('game-panels-left').style.display = 'none';
+            document.getElementById('game-overlay').style.display = 'none';
+            document.getElementById('game-controls').style.display = 'flex';
+        }
+
+        async function showScores() {
+            document.getElementById('game-overlay').style.display = 'flex';
+            document.getElementById('game-over-ui').style.display = 'none';
+            document.getElementById('scoreboard-ui').style.display = 'block';
+            // Could show top users here instead? For now keeping score list.
+            const res = await fetch('/api/scores');
+            const scores = await res.json();
+            document.getElementById('scoreboard').innerHTML = scores.map((s, i) => `
+                <div class="score-row"><span>#${i + 1} ${s.name}</span><span>${s.score}</span></div>
+            `).join('') || '<div style="padding:20px">No scores yet</div>';
+        }
+
+        function closeOverlay() { document.getElementById('game-overlay').style.display = 'none'; }
+
+        initMap();
+        fetchData();
+        setInterval(fetchData, REFRESH_INTERVAL_MS);
 
     </script>
 </body>

@@ -1,0 +1,14 @@
+[Unit]
+Description=Flight Monitor Service
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/overhead_flights_monitor
+ExecStart=/home/pi/overhead_flights_monitor/.venv/bin/python server.py
+Restart=always
+Environment=MY_LAT=60.3172
+Environment=MY_LON=24.9633
+
+[Install]
+WantedBy=multi-user.target
