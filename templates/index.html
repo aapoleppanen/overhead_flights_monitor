@@ -248,6 +248,8 @@
 
         .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-size: 1.1rem; }
 
+        .score-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
         /* Toggle Switch */
         .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -374,9 +376,9 @@
         <div class="glass-panel modal">
             <h2>Settings</h2>
             <div class="toggle-row">
-                <span>Show Destinations</span>
+                <span>Spoiler Free Mode</span>
                 <label class="switch">
-                    <input type="checkbox" id="toggle-dest" onchange="toggleDestinations()">
+                    <input type="checkbox" id="toggle-dest" checked onchange="toggleDestinations()">
                     <span class="slider"></span>
                 </label>
             </div>
@@ -408,7 +410,7 @@
             <button class="btn" onclick="quitGame()">Close</button>
         </div>
 
-        <div id="scoreboard-ui" style="display: none; width: 100%; max-width: 500px;">
+        <div id="scoreboard-ui" style="display: none; width: 100%; max-width: 500px; max-height: 100%; overflow-y: auto;">
             <div id="scoreboard" class="glass-panel" style="margin: 0 auto; padding: 20px;"></div>
             <div style="text-align: center; margin-top: 20px;">
                 <button class="btn btn-secondary" onclick="closeOverlay()">Close</button>
@@ -428,7 +430,7 @@
         let currentScore = 0;
         let currentTargetPlane = null;
         let currentOptions = [];
-        let showDestinations = false;
+        let spoilerFreeMode = true; // Default true for settings
         let roundsPlayed = 0;
         let roundStartTime = 0;
         let currentUser = "Guest";
@@ -502,12 +504,9 @@
             container.innerHTML = planes.map(p => {
                 const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
                 const borderStyle = isTarget ? 'border: 1px solid var(--target); background: rgba(251, 191, 36, 0.1);' : '';
-                let destText = "Hidden";
-                if (showDestinations) destText = p.destination ? '✈ ' + p.destination : 'Unknown Destination';
                 return `<div class="flight-card" style="${borderStyle}" onclick="openPlaneInfoId('${p.id}')">
                     <strong>${p.callsign}</strong>
                     <div class="flight-info"><span>${p.altitude_ft} ft</span><span>${p.velocity_kts} kts</span></div>
-                    <div style="font-size: 0.8rem; color: #aaa; margin-top: 4px;">${destText}</div>
                 </div>`;
             }).join('');
         }
@@ -546,22 +545,66 @@
                     }
 
                     const destEl = document.getElementById('info-dest');
-                    const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
+                    // const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id; // Removed duplicate declaration
 
                     // Game Logic: Use the swapped destination if provided
                     if (details.destination) p.resolvedDestination = details.destination;
 
                     // UI Display Logic
-                    if (isTarget && !showDestinations) {
-                        destEl.textContent = "HIDDEN"; destEl.style.filter = "blur(4px)";
-                    } else {
-                        if (showDestinations || isTarget) {
-                             destEl.textContent = details.real_destination || details.destination || "Unknown";
-                             destEl.style.filter = "none";
+                    // 1. Reset filters first to prevent flash
+                    destEl.style.filter = "none";
+                    destEl.style.color = "";
+                    originEl.style.filter = "none";
+                    originEl.style.color = "";
+
+                    // 2. Check if we are in game mode or spoiler mode
+                    const isTarget = gameActive && currentTargetPlane && currentTargetPlane.id === p.id;
+                    const shouldHide = isTarget || spoilerFreeMode;
+
+                    if (shouldHide) {
+                        // Check if origin is the answer (Hidden)
+                        if (originText === "Hidden") {
+                            originEl.textContent = "HIDDEN";
+                            originEl.style.filter = "blur(4px)";
+                            originEl.style.color = "var(--target)";
                         } else {
-                            destEl.textContent = "HIDDEN"; destEl.style.filter = "blur(4px)";
+                            // If origin is NOT hidden, then destination must be the answer or just unknown
+                             destEl.textContent = "HIDDEN";
+                             destEl.style.filter = "blur(4px)";
+                        }
+                    } else {
+                        // Show everything
+                        destEl.textContent = details.real_destination || details.destination || "Unknown";
+                        if (originText === "Hidden") {
+                            // Reveal real origin if we are not in spoiler mode?
+                            // Actually the backend hides it. We need the real origin from backend if we want to show it.
+                            // But backend only sends "Hidden" if it's the answer.
+                            // So we can't easily show it unless we change backend or use the 'game_city' logic reversal.
+                            // For now, let's just keep it as is, or if not game mode, maybe we shouldn't use game logic?
+                            // The backend 'Hidden' logic is hardcoded for now.
+                            // Assuming 'spoilerFreeMode' off means we want to see it.
+                            // But backend returns "Hidden".
+                            // We'll leave it as "Hidden" text but maybe unblurred if the user turned off spoilers?
+                            // Actually if spoiler free is OFF, we want to see the destination.
+                            destEl.textContent = details.real_destination || details.destination || "Unknown";
+
+                            // If origin is hidden from backend, we can't show it easily without a second request or backend change.
+                            // But wait, 'details.real_destination' is the destination.
+                            // If 'Hidden' comes from backend for origin, it means 'origin' was the answer.
+                            // If we want to reveal it, we show the answer.
+                            if (originText === "Hidden") {
+                                originEl.textContent = details.destination; // The 'answer' city is physically the origin in this case
+                            }
                         }
                     }
+
+                    // If we are in game and already revealed (this handles the flash issue if we re-open info)
+                    // Actually, if we just resolved, we are in "hidden" state until user guesses.
+                    // Unless game is over or round is done?
+                    // We don't easily track 'round done' state on the plane object.
+                    // But 'revealInfo' is called on guess.
+                    // If we close and reopen, it might reset to hidden. That's acceptable for now.
+
                 } else {
                      document.getElementById('info-model').textContent = "Unknown";
                      document.getElementById('info-dest').textContent = "Not Found";
@@ -570,9 +613,9 @@
         }
 
         function closePlaneInfo() { document.getElementById('right-sidebar').classList.remove('show-info'); }
-        function openSettings() { document.getElementById('settings-modal').style.display = 'flex'; document.getElementById('toggle-dest').checked = showDestinations; }
+        function openSettings() { document.getElementById('settings-modal').style.display = 'flex'; document.getElementById('toggle-dest').checked = spoilerFreeMode; }
         function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
-        function toggleDestinations() { showDestinations = document.getElementById('toggle-dest').checked; updateTimeline(currentPlanes); }
+        function toggleDestinations() { spoilerFreeMode = document.getElementById('toggle-dest').checked; updateTimeline(currentPlanes); }
 
         // --- Game Logic ---
 
@@ -829,8 +872,8 @@
                 // 1. Top Scores
                 html += '<h3 style="border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:5px; color:var(--accent); margin-bottom:10px;">High Scores</h3>';
                 if (data.high_scores && data.high_scores.length > 0) {
-                    html += data.high_scores.map((s, i) => `
-                        <div class="score-row"><span>#${i + 1} ${s.name}</span><span>${s.score}</span></div>
+                    html += data.high_scores.slice(0, 10).map((s, i) => `
+                        <div class="score-row"><span>#${i + 1} ${s.name}</span> <span>${s.score}</span></div>
                     `).join('');
                 } else {
                     html += '<div style="padding:10px; color:#aaa;">No scores yet</div>';
