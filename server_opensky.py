@@ -334,4 +334,5 @@ def api_scores():
 
 if __name__ == '__main__':
     # Run the server on port 4000
-    app.run(host='0.0.0.0', port=4000, debug=True)
+    # Turn off debug mode for better performance on Pi
+    app.run(host='0.0.0.0', port=4000, debug=False)

@@ -68,12 +68,11 @@
         }
 
         .glass-panel {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            /* Optimized for Pi 3: Use simple transparency instead of blur */
+            background: rgba(15, 23, 42, 0.95); /* Slightly more opaque */
             border: 1px solid var(--glass-border);
             border-radius: 20px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            box-shadow: 0 4px 10px 0 rgba(0, 0, 0, 0.5); /* Simpler shadow */
             pointer-events: auto;
             transition: background-color 0.3s, transform 0.3s ease, opacity 0.3s ease;
         }
@@ -171,7 +170,8 @@
             position: absolute;
             top: 10px; right: 10px;
             background: transparent; border: none;
-            color: var(--text-muted); cursor: pointer; font-size: 1.2rem;
+            color: var(--text-muted); cursor: pointer; font-size: 1.5rem;
+            height: 40px; width: 40px;
         }
 
         .flight-card {
@@ -290,6 +290,31 @@
         .kb-key:active { background: var(--accent); color: black; }
         .kb-key.wide { flex: 1; max-width: 100px; background: var(--accent); color: black; }
         #player-name-input { width: 100%; padding: 15px; font-size: 1.5rem; background: rgba(0, 0, 0, 0.3); border: 2px solid var(--accent); color: white; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+
+        /* User Chips */
+        .user-chip-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .user-chip {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+        .user-chip:hover {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
     </style>
 </head>
 
@@ -390,12 +415,14 @@
     <div id="login-modal" class="overlay-bg">
         <div class="glass-panel modal" style="text-align: center;">
             <h2>Identify Yourself</h2>
-            <input type="text" id="username-input" list="user-list" placeholder="Enter Pilot Name" style="width: 100%; padding: 15px; margin-bottom: 20px; border-radius: 10px; border: none;">
-            <datalist id="user-list">
+            <input type="text" id="username-input" placeholder="Enter Pilot Name" onfocus="showKeyboard()" style="width: 100%; padding: 15px; margin-bottom: 20px; border-radius: 10px; border: none; text-align: center;">
+
+            <div id="user-chip-container" class="user-chip-container">
                 <!-- Populated via JS -->
-            </datalist>
+            </div>
+
             <button class="btn" onclick="startGame()">Start Engine</button>
-            <button class="btn btn-secondary" onclick="document.getElementById('login-modal').style.display='none'" style="margin-top: 10px;">Cancel</button>
+            <button class="btn btn-secondary" onclick="hideKeyboard(); document.getElementById('login-modal').style.display='none'" style="margin-top: 10px;">Cancel</button>
         </div>
     </div>
 
@@ -415,6 +442,50 @@
             <div style="text-align: center; margin-top: 20px;">
                 <button class="btn btn-secondary" onclick="closeOverlay()">Close</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Keyboard Overlay -->
+    <div id="keyboard-overlay">
+        <div class="kb-row">
+            <button class="kb-key" onclick="kp('Q')">Q</button>
+            <button class="kb-key" onclick="kp('W')">W</button>
+            <button class="kb-key" onclick="kp('E')">E</button>
+            <button class="kb-key" onclick="kp('R')">R</button>
+            <button class="kb-key" onclick="kp('T')">T</button>
+            <button class="kb-key" onclick="kp('Y')">Y</button>
+            <button class="kb-key" onclick="kp('U')">U</button>
+            <button class="kb-key" onclick="kp('I')">I</button>
+            <button class="kb-key" onclick="kp('O')">O</button>
+            <button class="kb-key" onclick="kp('P')">P</button>
+        </div>
+        <div class="kb-row">
+            <button class="kb-key" onclick="kp('A')">A</button>
+            <button class="kb-key" onclick="kp('S')">S</button>
+            <button class="kb-key" onclick="kp('D')">D</button>
+            <button class="kb-key" onclick="kp('F')">F</button>
+            <button class="kb-key" onclick="kp('G')">G</button>
+            <button class="kb-key" onclick="kp('H')">H</button>
+            <button class="kb-key" onclick="kp('J')">J</button>
+            <button class="kb-key" onclick="kp('K')">K</button>
+            <button class="kb-key" onclick="kp('L')">L</button>
+        </div>
+        <div class="kb-row">
+            <button class="kb-key" onclick="kp('Z')">Z</button>
+            <button class="kb-key" onclick="kp('X')">X</button>
+            <button class="kb-key" onclick="kp('C')">C</button>
+            <button class="kb-key" onclick="kp('V')">V</button>
+            <button class="kb-key" onclick="kp('B')">B</button>
+            <button class="kb-key" onclick="kp('N')">N</button>
+            <button class="kb-key" onclick="kp('M')">M</button>
+        </div>
+        <div class="kb-row">
+             <button class="kb-key" style="background:#f87171;" onclick="kp('BACK')">⌫</button>
+             <button class="kb-key wide" onclick="kp('SPACE')">SPACE</button>
+             <button class="kb-key" style="background:#4ade80; color:black;" onclick="kp('ENTER')">⏎</button>
+        </div>
+        <div class="kb-row">
+            <button class="btn btn-secondary" style="padding: 5px 20px; font-size: 0.9rem;" onclick="hideKeyboard()">Hide Keyboard</button>
         </div>
     </div>
 
@@ -438,7 +509,7 @@
         const BACKUP_CITIES = ["London", "Paris", "New York", "Tokyo", "Dubai", "Berlin", "Rome", "Madrid", "Helsinki", "Stockholm", "Oslo", "Copenhagen"];
 
         function initMap() {
-            map = L.map('map', { zoomControl: false }).setView([MY_LAT, MY_LON], 10);
+            map = L.map('map', { zoomControl: false }).setView([MY_LAT, MY_LON], 13);
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                 attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
                 subdomains: 'abcd',
@@ -622,17 +693,24 @@
         async function startGamePrompt() {
             document.getElementById('login-modal').style.display = 'flex';
 
-            // Fetch existing users for autocomplete
+            showKeyboard();
+            setTimeout(() => document.getElementById('username-input').focus(), 100);
+
+            // Fetch existing users for chips
             try {
                 const res = await fetch('/api/scores');
                 const data = await res.json();
                 const users = data.user_stats || [];
-                const datalist = document.getElementById('user-list');
-                datalist.innerHTML = '';
+                const container = document.getElementById('user-chip-container');
+                container.innerHTML = '';
                 users.forEach(u => {
-                    const option = document.createElement('option');
-                    option.value = u.name;
-                    datalist.appendChild(option);
+                    const chip = document.createElement('div');
+                    chip.className = 'user-chip';
+                    chip.textContent = u.name;
+                    chip.onclick = () => {
+                        document.getElementById('username-input').value = u.name;
+                    };
+                    container.appendChild(chip);
                 });
             } catch (e) {
                 console.error("Failed to load users for dropdown", e);
@@ -902,6 +980,28 @@
         }
 
         function closeOverlay() { document.getElementById('game-overlay').style.display = 'none'; }
+
+        // --- Keyboard Logic ---
+        function showKeyboard() {
+            document.getElementById('keyboard-overlay').classList.add('visible');
+        }
+
+        function hideKeyboard() {
+            document.getElementById('keyboard-overlay').classList.remove('visible');
+        }
+
+        function kp(key) {
+            const input = document.getElementById('username-input');
+            if (key === 'BACK') {
+                input.value = input.value.slice(0, -1);
+            } else if (key === 'SPACE') {
+                input.value += ' ';
+            } else if (key === 'ENTER') {
+                startGame();
+            } else {
+                input.value += key;
+            }
+        }
 
         initMap();
         fetchData();

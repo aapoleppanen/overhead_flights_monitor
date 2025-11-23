@@ -1,0 +1,15 @@
+[Unit]
+Description=Flight Monitor Backend
+After=network.target
+
+[Service]
+User=flightradar
+WorkingDirectory=/home/flightradar
+# Adjust python path if you aren't using venv, or if path differs
+ExecStart=/usr/bin/python server_opensky.py
+Restart=always
+Environment=MY_LAT=60.25881233034921
+Environment=MY_LON=24.780103286993022
+
+[Install]
+WantedBy=multi-user.target

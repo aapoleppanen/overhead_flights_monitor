@@ -1,1 +1,8 @@
-{"Aapo": {"name": "Aapo", "games_played": 20, "total_score": 39261, "best_score": 3321}, "test": {"name": "test", "games_played": 1, "total_score": 184, "best_score": 184}}
+{
+  "Aapo": {
+    "name": "Aapo",
+    "games_played": 3,
+    "total_score": 400,
+    "best_score": 300
+  }
+}
