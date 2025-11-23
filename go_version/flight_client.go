@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -245,7 +244,7 @@ func (fc *FlightClient) FetchFlights(centerLat, centerLon, radiusDeg float64) ([
 			OnGround:    s[8].(bool),
 			Origin:      s[2].(string),
 			Category:    catStr,
-			Destination: inferDestination(heading),
+			// Destination: inferDestination(heading), // Removed
 		}
 		flights = append(flights, f)
 	}
@@ -254,31 +253,4 @@ func (fc *FlightClient) FetchFlights(centerLat, centerLon, radiusDeg float64) ([
 	fc.lastFetch = time.Now()
 
 	return flights, nil
-}
-
-// Make inferDestination public so main.go can reuse it for inferring origin
-func inferDestination(heading float64) string {
-	h := math.Mod(heading, 360)
-	if h < 0 {
-		h += 360
-	}
-
-	if h >= 337.5 || h < 22.5 {
-		return "Rovaniemi"
-	} else if h < 67.5 {
-		return "Joensuu"
-	} else if h < 112.5 {
-		return "St. Petersburg"
-	} else if h < 157.5 {
-		return "Moscow"
-	} else if h < 202.5 {
-		return "Tallinn"
-	} else if h < 247.5 {
-		return "Berlin"
-	} else if h < 292.5 {
-		return "Stockholm"
-	} else if h < 337.5 {
-		return "Tampere"
-	}
-	return "Unknown"
 }

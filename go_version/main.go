@@ -36,8 +36,8 @@ const (
 )
 
 var (
-	myLat = 60.3172
-	myLon = 24.9633
+	myLat = 60.25881233034921
+	myLon = 24.780103286993022
 )
 
 // GameState enum
@@ -115,6 +115,7 @@ type Button struct {
 	Text       string
 	Action     func()
 	Color      color.Color
+	TextColor  color.Color
 }
 
 func NewGame(fc *FlightClient) *Game {
@@ -226,6 +227,9 @@ func (g *Game) Update() error {
 			if g.state == StateMap || g.state == StateGamePlaying {
 				g.checkPlaneClick(g.dragStartX, g.dragStartY)
 			}
+		} else {
+			// UI clicked, cancel drag
+			g.isDragging = false
 		}
 	}
 
@@ -374,6 +378,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawLeaderboard(screen)
 	} else {
 		g.drawMap(screen)
+		g.drawHomeMarker(screen)
 		g.drawPlanes(screen)
 		g.drawUI(screen)
 	}
@@ -450,7 +455,7 @@ func (g *Game) drawLogin(screen *ebiten.Image) {
 	for _, b := range g.buttons {
 		ebitenutil.DrawRect(screen, float64(b.X), float64(b.Y), float64(b.W), float64(b.H), b.Color)
 		tW := len(b.Text) * 7
-		text.Draw(screen, b.Text, basicfont.Face7x13, b.X+(b.W-tW)/2, b.Y+b.H/2+4, color.Black)
+		text.Draw(screen, b.Text, basicfont.Face7x13, b.X+(b.W-tW)/2, b.Y+b.H/2+4, b.TextColor)
 	}
 }
 
@@ -486,7 +491,7 @@ func (g *Game) drawLeaderboard(screen *ebiten.Image) {
 	for _, b := range g.buttons {
 		ebitenutil.DrawRect(screen, float64(b.X), float64(b.Y), float64(b.W), float64(b.H), b.Color)
 		tW := len(b.Text) * 7
-		text.Draw(screen, b.Text, basicfont.Face7x13, b.X+(b.W-tW)/2, b.Y+b.H/2+4, color.Black)
+		text.Draw(screen, b.Text, basicfont.Face7x13, b.X+(b.W-tW)/2, b.Y+b.H/2+4, b.TextColor)
 	}
 }
 
@@ -526,6 +531,23 @@ func (g *Game) drawMap(screen *ebiten.Image) {
 				screen.DrawImage(img, op)
 			}
 		}
+	}
+}
+
+func (g *Game) drawHomeMarker(screen *ebiten.Image) {
+	centerX, centerY := LatLonToPixels(g.camLat, g.camLon, g.camZoom)
+	screenCX, screenCY := float64(screenWidth)/2, float64(screenHeight)/2
+	minWX := centerX - screenCX
+	minWY := centerY - screenCY
+
+	hX, hY := LatLonToPixels(myLat, myLon, g.camZoom)
+	sX := hX - minWX
+	sY := hY - minWY
+
+	if sX >= 0 && sX <= float64(screenWidth) && sY >= 0 && sY <= float64(screenHeight) {
+		// Draw a dot (6x6 square)
+		size := 6.0
+		ebitenutil.DrawRect(screen, sX-size/2, sY-size/2, size, size, hexToColor(colAccent))
 	}
 }
 
@@ -620,7 +642,7 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 		}
 
 		// Close Button
-		g.addButton(screenWidth-50, 95, 30, 30, "X", func() { g.selectedPlane = nil }, color.RGBA{255, 255, 255, 50})
+		g.addButton(screenWidth-50, 95, 30, 30, "X", func() { g.selectedPlane = nil }, color.RGBA{255, 255, 255, 50}, color.Black)
 	}
 
 	// Game Panel (Left)
@@ -629,7 +651,7 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 		text.Draw(screen, "Tracking target...", basicfont.Face7x13, 40, 140, color.White)
 		text.Draw(screen, "Please wait", basicfont.Face7x13, 40, 160, hexToColor(colTextMuted))
 	} else if g.state == StateGamePlaying && g.targetPlane != nil {
-		g.drawPanel(screen, 20, 90, 280, 300, fmt.Sprintf("ROUND %d/5", g.round))
+		g.drawPanel(screen, 20, 90, 280, 340, fmt.Sprintf("ROUND %d/5", g.round))
 
 		text.Draw(screen, g.questionText, basicfont.Face7x13, 40, 140, color.White)
 
@@ -649,12 +671,14 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 
 			// Capture variable for closure
 			btnOpt := opt
-			g.addButton(40, y, 240, 40, opt, func() { g.guess(btnOpt) }, col)
+			g.addButton(40, y, 240, 40, opt, func() { g.guess(btnOpt) }, col, color.Black)
 			y += 50
 		}
 
 		// Score
 		text.Draw(screen, fmt.Sprintf("Score: %d", g.score), basicfont.Face7x13, 40, y+20, hexToColor(colAccent))
+
+		y += 40 // Add margin after the score
 
 		// Quit Button
 		g.addButton(20, 400, 100, 30, "QUIT", func() { g.endGame() }, hexToColor(colDanger))
@@ -663,6 +687,10 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 	// Bottom Controls
 	if g.state == StateMap {
 		g.addButton(screenWidth/2-60, screenHeight-60, 120, 40, "PLAY GAME", func() { g.startGame() }, hexToColor(colAccent))
+		g.addButton(20, screenHeight-60, 80, 40, "CENTER", func() {
+			g.camLat = myLat
+			g.camLon = myLon
+		}, hexToColor(colGlass))
 	} else if g.state == StateGameOver {
 		g.drawPanel(screen, screenWidth/2-150, screenHeight/2-100, 300, 200, "GAME OVER")
 		text.Draw(screen, fmt.Sprintf("Final Score: %d", g.score), basicfont.Face7x13, screenWidth/2-50, screenHeight/2, color.White)
@@ -674,7 +702,7 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 		ebitenutil.DrawRect(screen, float64(b.X), float64(b.Y), float64(b.W), float64(b.H), b.Color)
 		// Center text roughly
 		tW := len(b.Text) * 7
-		text.Draw(screen, b.Text, basicfont.Face7x13, b.X+(b.W-tW)/2, b.Y+b.H/2+4, color.Black)
+		text.Draw(screen, b.Text, basicfont.Face7x13, b.X+(b.W-tW)/2, b.Y+b.H/2+4, b.TextColor)
 	}
 
 	ebitenutil.DebugPrint(screen, fmt.Sprintf("FPS: %0.2f", ebiten.ActualFPS()))
@@ -687,8 +715,12 @@ func (g *Game) drawPanel(screen *ebiten.Image, x, y, w, h int, title string) {
 	text.Draw(screen, title, basicfont.Face7x13, x+20, y+30, hexToColor(colAccent))
 }
 
-func (g *Game) addButton(x, y, w, h int, label string, action func(), col color.Color) {
-	g.buttons = append(g.buttons, Button{X: x, Y: y, W: w, H: h, Text: label, Action: action, Color: col})
+func (g *Game) addButton(x, y, w, h int, label string, action func(), col color.Color, txtCol ...color.Color) {
+	textColor := color.Color(color.White)
+	if len(txtCol) > 0 {
+		textColor = txtCol[0]
+	}
+	g.buttons = append(g.buttons, Button{X: x, Y: y, W: w, H: h, Text: label, Action: action, Color: col, TextColor: textColor})
 }
 
 func (g *Game) startGame() {
