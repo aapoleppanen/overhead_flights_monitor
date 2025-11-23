@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	scoresFile   = "../scores.json"
-	usersFile    = "../users.json"
+	scoresFile   = "./scores.json"
+	usersFile    = "./users.json"
 	airportsFile = "./airports.json"
 )
 

@@ -60,6 +60,7 @@ type Game struct {
 	scraper      *Scraper
 	flights      []Flight
 	state        State
+	shouldQuit   bool
 
 	// Data
 	currentUser   UserStats
@@ -199,6 +200,11 @@ func (g *Game) refreshFlights() {
 }
 
 func (g *Game) Update() error {
+	// handle quit request
+	if g.shouldQuit {
+		return ebiten.Termination
+	}
+
 	// Text Input for Login
 	if g.state == StateLogin {
 		if !g.showDeleteConfirm {
@@ -387,7 +393,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 func (g *Game) drawLogin(screen *ebiten.Image) {
 	g.buttons = []Button{}
 
-	title := "FLIGHT MONITOR"
+	title := "VANTAA FLIGHTRADAR24"
 	titleW := len(title) * 7 * 2 // approx scale 2
 	// Use scale for title
 	op := &ebiten.DrawImageOptions{}
@@ -450,6 +456,11 @@ func (g *Game) drawLogin(screen *ebiten.Image) {
 			y += 40
 		}
 	}
+
+	// Add a bottom-left EXIT button on the login screen
+	g.addButton(20, screenHeight-50, 100, 30, "QUIT", func() {
+		g.shouldQuit = true
+	}, hexToColor(colDanger))
 
 	// Draw buttons
 	for _, b := range g.buttons {
@@ -947,6 +958,10 @@ func main() {
 	game := NewGame(client)
 	ebiten.SetWindowSize(screenWidth, screenHeight)
 	ebiten.SetWindowTitle("Flight Monitor (Go)")
+
+	ebiten.SetTPS(24)
+	ebiten.SetFullscreen(true)
+
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
