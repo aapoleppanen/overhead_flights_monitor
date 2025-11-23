@@ -29,7 +29,7 @@ const (
 	logicalWidth  = 1280
 	logicalHeight = 720
 
-	defaultZoom = 10
+	defaultZoom = 11
 
 	// UI Colors
 	colBgDark     = 0x0f172aff // #0f172a
@@ -880,6 +880,18 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 		g.addButton(20, logicalHeight-60, 80, 40, "CENTER", func() {
 			g.camLat = myLat
 			g.camLon = myLon
+		}, hexToColor(colGlass))
+
+		// Zoom Buttons (Bottom Right)
+		g.addButton(logicalWidth-110, logicalHeight-60, 40, 40, "-", func() {
+			if g.camZoom > 4 {
+				g.camZoom--
+			}
+		}, hexToColor(colGlass))
+		g.addButton(logicalWidth-60, logicalHeight-60, 40, 40, "+", func() {
+			if g.camZoom < 18 {
+				g.camZoom++
+			}
 		}, hexToColor(colGlass))
 	} else if g.state == StateGameOver {
 		g.drawPanel(screen, logicalWidth/2-150, logicalHeight/2-100, 300, 200, "GAME OVER")

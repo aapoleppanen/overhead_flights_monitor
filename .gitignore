@@ -1,3 +1,7 @@
 .venv
 autorun.md
 credentials.json
+
+go.sum
+scores.json
+users.json
