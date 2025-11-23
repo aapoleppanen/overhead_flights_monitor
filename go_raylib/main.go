@@ -19,8 +19,8 @@ const (
 	// We'll treat the screen as natively landscape for simplicity if rotated via config,
 	// or we can stick to the 800x600 user mentioned.
 	// Let's assume the user wants the 854x480 logical size we settled on.
-	screenWidth  = 854
-	screenHeight = 480
+	screenWidth  = 1280
+	screenHeight = 720
 
 	defaultZoom = 11
 
@@ -216,10 +216,29 @@ func (g *Game) refreshFlights() {
 // createPlaneTexture generates a simple plane sprite
 func createPlaneTexture() rl.Texture2D {
 	img := rl.GenImageColor(32, 32, rl.Blank)
-	// Draw a simple triangle-like shape
-	rl.ImageDrawRectangle(img, 14, 2, 4, 26, rl.White)  // Fuselage
-	rl.ImageDrawRectangle(img, 2, 16, 28, 4, rl.White)  // Wings
-	rl.ImageDrawRectangle(img, 10, 24, 12, 4, rl.White) // Tail
+
+	// Draw a detailed plane shape similar to the Ebiten version
+	// Center is 16,16
+
+	// Main Body (Fuselage)
+	rl.ImageDrawRectangle(img, 14, 2, 4, 26, rl.White)
+
+	// Wings (Triangle shape)
+	// Left Wing
+	rl.ImageDrawTriangle(img,
+		rl.Vector2{X: 14, Y: 12},
+		rl.Vector2{X: 2, Y: 20},
+		rl.Vector2{X: 14, Y: 20},
+		rl.White)
+	// Right Wing
+	rl.ImageDrawTriangle(img,
+		rl.Vector2{X: 18, Y: 12},
+		rl.Vector2{X: 18, Y: 20},
+		rl.Vector2{X: 30, Y: 20},
+		rl.White)
+
+	// Tail
+	rl.ImageDrawRectangle(img, 10, 24, 12, 3, rl.White)
 
 	tex := rl.LoadTextureFromImage(img)
 	rl.UnloadImage(img)
@@ -228,6 +247,8 @@ func createPlaneTexture() rl.Texture2D {
 
 func (g *Game) Init() {
 	g.planeTex = createPlaneTexture()
+	// Set texture filter to Point for crisp text if using default font at integer scales
+	// rl.SetTextureFilter(rl.GetFontDefault().Texture, rl.TextureFilterPoint)
 }
 
 func (g *Game) Unload() {
@@ -385,10 +406,10 @@ func (g *Game) checkUIClick(x, y int) bool {
 		}
 	}
 
-	if g.selectedPlane != nil && x > screenWidth-220 {
+	if g.selectedPlane != nil && x > screenWidth-300 {
 		return true
 	}
-	if g.state == StateGamePlaying && x < 220 {
+	if g.state == StateGamePlaying && x < 300 {
 		return true
 	}
 
@@ -547,7 +568,8 @@ func (g *Game) drawPlanes() {
 		origin := rl.Vector2{X: 16, Y: 16} // Center of rotation
 
 		tint := rl.White
-		if g.state == StateGamePlaying && g.targetPlane != nil && f.Icao24 == g.targetPlane.Icao24 {
+		// g.state == StateGamePlaying && -- add this to set only for game mode
+		if g.targetPlane != nil && f.Icao24 == g.targetPlane.Icao24 {
 			tint = rl.Orange // Highlight
 		}
 
@@ -574,7 +596,7 @@ func (g *Game) drawUI() {
 			g.refreshLeaderboard()
 			g.state = StateLeaderboard
 		}, getRlColor(colGlass))
-		g.addButton(screenWidth-220, 10, 100, 30, "LOGOUT", func() {
+		g.addButton(screenWidth-220, 10, 80, 30, "LOGOUT", func() {
 			g.state = StateLogin
 			g.inputText = ""
 		}, getRlColor(colDanger))
@@ -582,8 +604,8 @@ func (g *Game) drawUI() {
 
 	// Sidebar
 	if g.selectedPlane != nil {
-		panelW := 220
-		panelX := screenWidth - panelW - 10
+		panelW := 300
+		panelX := screenWidth - panelW - 20
 		g.drawPanel(panelX, 90, panelW, 350, "FLIGHT INFO")
 
 		p := g.selectedPlane
@@ -592,18 +614,18 @@ func (g *Game) drawUI() {
 
 		rl.DrawText(p.Callsign, int32(txtX), int32(y), 20, getRlColor(colAccent))
 		y += 30
-		rl.DrawText(fmt.Sprintf("Alt: %d ft", p.AltitudeFt), int32(txtX), int32(y), 10, rl.White)
-		y += 20
-		rl.DrawText(fmt.Sprintf("Spd: %d kts", p.VelocityKts), int32(txtX), int32(y), 10, rl.White)
-		y += 20
-		rl.DrawText(fmt.Sprintf("Pos: %.2f, %.2f", p.Lat, p.Lon), int32(txtX), int32(y), 10, rl.White)
-		y += 30
+		rl.DrawText(fmt.Sprintf("Alt: %d ft", p.AltitudeFt), int32(txtX), int32(y), 16, rl.White)
+		y += 25
+		rl.DrawText(fmt.Sprintf("Spd: %d kts", p.VelocityKts), int32(txtX), int32(y), 16, rl.White)
+		y += 25
+		rl.DrawText(fmt.Sprintf("Pos: %.2f, %.2f", p.Lat, p.Lon), int32(txtX), int32(y), 16, rl.White)
+		y += 35
 
 		if g.resolving {
-			rl.DrawText("Fetching details...", int32(txtX), int32(y), 10, getRlColor(colTextMuted))
+			rl.DrawText("Fetching details...", int32(txtX), int32(y), 16, getRlColor(colTextMuted))
 		} else if g.resolvedDetails != nil {
-			rl.DrawText("Model: "+truncate(g.resolvedDetails.Model, 20), int32(txtX), int32(y), 10, rl.White)
-			y += 20
+			rl.DrawText("Model: "+truncate(g.resolvedDetails.Model, 25), int32(txtX), int32(y), 16, rl.White)
+			y += 25
 
 			orig := g.resolvedDetails.Origin
 			dest := g.resolvedDetails.RealDestination
@@ -617,30 +639,31 @@ func (g *Game) drawUI() {
 				}
 			}
 
-			rl.DrawText("From: "+truncate(orig, 20), int32(txtX), int32(y), 10, rl.White)
-			y += 20
-			rl.DrawText("To:   "+truncate(dest, 20), int32(txtX), int32(y), 10, rl.White)
+			rl.DrawText("From: "+truncate(orig, 25), int32(txtX), int32(y), 16, rl.White)
+			y += 25
+			rl.DrawText("To:   "+truncate(dest, 25), int32(txtX), int32(y), 16, rl.White)
 		} else {
-			rl.DrawText("Details unavailable", int32(txtX), int32(y), 10, getRlColor(colTextMuted))
+			rl.DrawText("Details unavailable", int32(txtX), int32(y), 16, getRlColor(colTextMuted))
 		}
 
-		g.addButton(screenWidth-40, 95, 30, 30, "X", func() { g.selectedPlane = nil }, rl.Color{255, 255, 255, 50}, rl.Black)
+		g.addButton(screenWidth-50, 95, 30, 30, "X", func() { g.selectedPlane = nil }, rl.Color{255, 255, 255, 50}, rl.Black)
 	}
 
 	// Game Panel
 	if g.state == StateRoundSetup {
-		g.drawPanel(20, 90, 220, 150, fmt.Sprintf("ROUND %d/5", g.round))
+		g.drawPanel(20, 90, 300, 150, fmt.Sprintf("ROUND %d/5", g.round))
 		rl.DrawText("Tracking target...", 40, 140, 20, rl.White)
 	} else if g.state == StateGamePlaying && g.targetPlane != nil {
-		g.drawPanel(20, 90, 220, 340, fmt.Sprintf("ROUND %d/5", g.round))
+		// Increased height from 340 to 400 to fit score
+		g.drawPanel(20, 90, 300, 400, fmt.Sprintf("ROUND %d/5", g.round))
 
 		qText := g.questionText
-		if len(qText) > 25 {
-			qText = qText[:25] + "..."
+		if len(qText) > 30 {
+			qText = qText[:30] + "..."
 		}
 		rl.DrawText(qText, 30, 140, 20, rl.White)
 
-		y := 170
+		y := 180
 		for _, opt := range g.options {
 			col := rl.Fade(rl.White, 0.2)
 			if g.showResult {
@@ -653,19 +676,24 @@ func (g *Game) drawUI() {
 
 			// Capture
 			o := opt
-			g.addButton(30, y, 200, 40, truncate(o, 20), func() { g.guess(o) }, col, rl.Black)
-			y += 50
+			// Reduced height to 35, wider width 280
+			g.addButton(30, y, 280, 35, truncate(o, 32), func() { g.guess(o) }, col, rl.Black)
+			y += 45
 		}
 
-		rl.DrawText(fmt.Sprintf("Score: %d", g.score), 30, int32(y)+20, 20, getRlColor(colAccent))
-		g.addButton(20, 400, 100, 30, "QUIT", func() { g.endGame() }, getRlColor(colDanger))
+		rl.DrawText(fmt.Sprintf("Score: %d", g.score), 30, int32(y)+10, 20, getRlColor(colAccent))
+		g.addButton(20, 450, 100, 30, "QUIT", func() { g.endGame() }, getRlColor(colDanger))
 	}
 
 	// Bottom Controls
+	// Show PLAY GAME only if in Map mode
 	if g.state == StateMap {
 		g.addButton(screenWidth/2-60, screenHeight-60, 120, 40, "PLAY GAME", func() { g.startGame() }, getRlColor(colAccent))
 		g.addButton(20, screenHeight-60, 80, 40, "CENTER", func() { g.camLat, g.camLon = myLat, myLon }, getRlColor(colGlass))
+	}
 
+	// Zoom buttons (Always show in Map AND GamePlaying)
+	if g.state == StateMap || g.state == StateGamePlaying {
 		g.addButton(screenWidth-110, screenHeight-60, 40, 40, "-", func() {
 			if g.camZoom > 4 {
 				g.camZoom--
@@ -676,7 +704,9 @@ func (g *Game) drawUI() {
 				g.camZoom++
 			}
 		}, getRlColor(colGlass))
-	} else if g.state == StateGameOver {
+	}
+
+	if g.state == StateGameOver {
 		g.drawPanel(screenWidth/2-150, screenHeight/2-100, 300, 200, "GAME OVER")
 		rl.DrawText(fmt.Sprintf("Final Score: %d", g.score), int32(screenWidth)/2-50, int32(screenHeight)/2, 20, rl.White)
 		g.addButton(screenWidth/2-60, screenHeight/2+40, 120, 40, "CLOSE", func() { g.endGame() }, getRlColor(colAccent))
@@ -687,10 +717,12 @@ func (g *Game) drawUI() {
 		rl.DrawRectangle(int32(b.X), int32(b.Y), int32(b.W), int32(b.H), b.Color)
 		// Centering text is a bit harder in Raylib without measuring,
 		// but simple approx or MeasureText works.
-		tw := rl.MeasureText(b.Text, 20)
+		// Use font size 16 instead of 20 for smaller button text
+		fontSize := int32(16)
+		tw := rl.MeasureText(b.Text, fontSize)
 		tx := b.X + (b.W-int(tw))/2
-		ty := b.Y + (b.H-20)/2 + 2
-		rl.DrawText(b.Text, int32(tx), int32(ty), 20, b.TextColor)
+		ty := b.Y + (b.H-int(fontSize))/2 + 2
+		rl.DrawText(b.Text, int32(tx), int32(ty), fontSize, b.TextColor)
 	}
 }
 
@@ -702,7 +734,8 @@ func (g *Game) drawPanel(x, y, w, h int, title string) {
 func (g *Game) drawLogin() {
 	g.buttons = g.buttons[:0]
 
-	title := "VANTAA FLIGHTS"
+	// DO NOT CHANGE THIS TITLE
+	title := "VANTAA FLIGHTRADAR24"
 	tw := rl.MeasureText(title, 30)
 	rl.DrawText(title, int32(screenWidth-int(tw))/2, 80, 30, getRlColor(colAccent))
 
@@ -777,13 +810,17 @@ func (g *Game) drawLogin() {
 
 	g.addButton(20, screenHeight-50, 100, 30, "QUIT", func() { g.shouldQuit = true }, getRlColor(colDanger))
 
-	// Draw buttons for this state
+	// Draw Buttons
 	for _, b := range g.buttons {
 		rl.DrawRectangle(int32(b.X), int32(b.Y), int32(b.W), int32(b.H), b.Color)
-		tw := rl.MeasureText(b.Text, 20)
+		// Centering text is a bit harder in Raylib without measuring,
+		// but simple approx or MeasureText works.
+		// Use font size 16 instead of 20 for smaller button text
+		fontSize := int32(16)
+		tw := rl.MeasureText(b.Text, fontSize)
 		tx := b.X + (b.W-int(tw))/2
-		ty := b.Y + (b.H-20)/2 + 2
-		rl.DrawText(b.Text, int32(tx), int32(ty), 20, b.TextColor)
+		ty := b.Y + (b.H-int(fontSize))/2 + 2
+		rl.DrawText(b.Text, int32(tx), int32(ty), fontSize, b.TextColor)
 	}
 }
 
