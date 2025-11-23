@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,6 +83,8 @@ type Game struct {
 	inputText         string
 	userToDelete      string
 	showDeleteConfirm bool
+	isKeyboardOpen    bool
+	keyboardLayout    []string
 
 	// Camera
 	camLat  float64
@@ -141,6 +144,11 @@ func NewGame(fc *FlightClient) *Game {
 		planeImg:     createPlaneImage(),
 		state:        StateLogin,
 		offscreen:    ebiten.NewImage(logicalWidth, logicalHeight),
+		keyboardLayout: []string{
+			"QWERTYUIOP",
+			"ASDFGHJKL",
+			"ZXCVBNM-",
+		},
 	}
 
 	// Load initial data
@@ -255,9 +263,13 @@ func (g *Game) Update() error {
 		}
 	}
 
+	// Keyboard Input Logic (Overlay)
+	// Note: We do NOT return early here because we need checkUIClick to run
+	// so that keyboard buttons can be pressed.
+
 	// 1. Handle Pinch-to-Zoom (Two Fingers)
 	touchIDs := ebiten.AppendTouchIDs(nil)
-	if len(touchIDs) == 2 {
+	if !g.isKeyboardOpen && len(touchIDs) == 2 {
 		// Get raw physical positions of both fingers
 		x1, y1 := ebiten.TouchPosition(touchIDs[0])
 		x2, y2 := ebiten.TouchPosition(touchIDs[1])
@@ -312,13 +324,17 @@ func (g *Game) Update() error {
 		g.startCamLat, g.startCamLon = g.camLat, g.camLon
 
 		// Check click on planes/UI
-		if !g.checkUIClick(g.dragStartX, g.dragStartY) {
-			if g.state == StateMap || g.state == StateGamePlaying {
+		if g.checkUIClick(g.dragStartX, g.dragStartY) {
+			// UI clicked (buttons/keyboard), cancel drag
+			g.isDragging = false
+		} else {
+			// UI NOT clicked
+			if g.isKeyboardOpen {
+				// If keyboard is open, ignore map clicks
+				g.isDragging = false
+			} else if g.state == StateMap || g.state == StateGamePlaying {
 				g.checkPlaneClick(g.dragStartX, g.dragStartY)
 			}
-		} else {
-			// UI clicked, cancel drag
-			g.isDragging = false
 		}
 	}
 
@@ -367,6 +383,7 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) login(name string) {
+	g.isKeyboardOpen = false
 	if u, ok := g.usersMap[name]; ok {
 		g.currentUser = u
 	} else {
@@ -528,33 +545,94 @@ func (g *Game) drawLogin(screen *ebiten.Image) {
 		text.Draw(screen, g.inputText, basicfont.Face7x13, logicalWidth/2-95, 200, color.Black)
 
 		if len(g.inputText) > 0 {
-			g.addButton(logicalWidth/2+110, 180, 60, 30, "GO", func() { g.login(g.inputText) }, hexToColor(colSuccess))
+			// Remove the old GO button next to text box
+			// g.addButton(logicalWidth/2+110, 180, 60, 30, "GO", func() { g.login(g.inputText) }, hexToColor(colSuccess))
 		}
 
-		// User List
-		y := 240
-		keys := make([]string, 0, len(g.usersMap))
-		for k := range g.usersMap {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
+		// Keyboard Toggle Button (Hidden invisible button over text box to trigger keyboard)
+		g.addButton(logicalWidth/2-100, 180, 200, 30, "", func() {
+			g.isKeyboardOpen = !g.isKeyboardOpen
+		}, color.Transparent)
 
-		for _, name := range keys {
-			u := g.usersMap[name]
-			label := fmt.Sprintf("%s (Best: %d)", u.Name, u.BestScore)
-			// Capture loop var
-			n := name
+		// Render Keyboard if Open
+		if g.isKeyboardOpen {
+			// Standard QWERTY: max 10 cols. 50px/key -> 500px wide.
+			kbW := 520
+			kbH := 250
+			kbY := 300
+			kbX := (logicalWidth - kbW) / 2
 
-			// User button
-			g.addButton(logicalWidth/2-100, y, 200, 30, label, func() { g.login(n) }, hexToColor(colGlassLight))
+			// Background
+			ebitenutil.DrawRect(screen, float64(kbX-10), float64(kbY-10), float64(kbW+20), float64(kbH+20), hexToColor(colBgDark))
 
-			// Delete button
-			g.addButton(logicalWidth/2+110, y, 30, 30, "X", func() {
-				g.userToDelete = n
-				g.showDeleteConfirm = true
+			for rowIdx, row := range g.keyboardLayout {
+				// Center each row
+				rowLen := len(row)
+				rowWidth := rowLen * 50
+				rowStart := kbX + (kbW-rowWidth)/2
+
+				for colIdx, char := range row {
+					charStr := string(char)
+					btnX := rowStart + colIdx*50
+					btnY := kbY + rowIdx*50
+
+					g.addButton(btnX, btnY, 45, 45, charStr, func() {
+						g.inputText += charStr
+					}, hexToColor(colGlassLight))
+				}
+			}
+
+			// Bottom Row Controls
+			ctrlY := kbY + 3*50 + 10
+
+			// HIDE (Left)
+			g.addButton(kbX, ctrlY, 100, 45, "HIDE", func() {
+				g.isKeyboardOpen = false
+			}, hexToColor(colGlass))
+
+			// DEL (Center-ish)
+			g.addButton(kbX+120, ctrlY, 100, 45, "DEL", func() {
+				if len(g.inputText) > 0 {
+					g.inputText = g.inputText[:len(g.inputText)-1]
+				}
 			}, hexToColor(colDanger))
 
-			y += 40
+			// ENTER (Right)
+			g.addButton(kbX+kbW-120, ctrlY, 120, 45, "ENTER", func() {
+				// Enter acts as Login if text exists, else just closes
+				if len(g.inputText) > 0 {
+					g.login(g.inputText)
+				} else {
+					g.isKeyboardOpen = false
+				}
+			}, hexToColor(colSuccess))
+
+		} else {
+			// User List (Only show if keyboard is closed)
+			y := 240
+			keys := make([]string, 0, len(g.usersMap))
+			for k := range g.usersMap {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			for _, name := range keys {
+				u := g.usersMap[name]
+				label := fmt.Sprintf("%s (Best: %d)", u.Name, u.BestScore)
+				// Capture loop var
+				n := name
+
+				// User button
+				g.addButton(logicalWidth/2-100, y, 200, 30, label, func() { g.login(n) }, hexToColor(colGlassLight))
+
+				// Delete button
+				g.addButton(logicalWidth/2+110, y, 30, 30, "X", func() {
+					g.userToDelete = n
+					g.showDeleteConfirm = true
+				}, hexToColor(colDanger))
+
+				y += 40
+			}
 		}
 	}
 
@@ -1061,7 +1139,9 @@ func main() {
 	ebiten.SetWindowTitle("Flight Monitor (Rotated)")
 
 	ebiten.SetTPS(24)
-	ebiten.SetFullscreen(true)
+	if runtime.GOOS != "darwin" {
+		ebiten.SetFullscreen(true)
+	}
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)

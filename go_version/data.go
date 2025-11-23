@@ -3,14 +3,31 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 )
 
+// Helper to get persistent file path
+func (dm *DataManager) getFilePath(filename string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filename // Fallback to current dir
+	}
+	// Store data in a persistent subfolder hidden in home
+	dir := filepath.Join(home, ".flight-monitor-data")
+
+	// Create dir if not exists (check error to be safe, but ignore if exists)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		_ = os.MkdirAll(dir, 0755)
+	}
+	return filepath.Join(dir, filename)
+}
+
 const (
-	scoresFile   = "./scores.json"
-	usersFile    = "./users.json"
-	airportsFile = "./airports.json"
+	scoresFile   = "scores.json"
+	usersFile    = "users.json"
+	airportsFile = "airports.json"
 )
 
 // UserStats represents a player's statistics
@@ -42,7 +59,7 @@ func (dm *DataManager) LoadUsers() (map[string]UserStats, error) {
 	defer dm.mu.Unlock()
 
 	users := make(map[string]UserStats)
-	data, err := os.ReadFile(usersFile)
+	data, err := os.ReadFile(dm.getFilePath(usersFile))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return users, nil
@@ -85,7 +102,7 @@ func (dm *DataManager) SaveUser(name string, score int) (UserStats, error) {
 		return user, err
 	}
 
-	if err := os.WriteFile(usersFile, data, 0644); err != nil {
+	if err := os.WriteFile(dm.getFilePath(usersFile), data, 0644); err != nil {
 		return user, err
 	}
 
@@ -94,6 +111,12 @@ func (dm *DataManager) SaveUser(name string, score int) (UserStats, error) {
 
 // DeleteUser removes a user from the users.json file
 func (dm *DataManager) DeleteUser(name string) error {
+	// Note: Calling LoadUsers() here would deadlock if we held lock,
+	// but LoadUsers acquires its own lock.
+	// However, we shouldn't call public methods that lock from other methods.
+	// Refactoring to just load raw here for safety or trust the flow.
+	// Actually, LoadUsers is fine as long as we don't hold lock across it.
+
 	users, err := dm.LoadUsers()
 	if err != nil {
 		return err
@@ -110,7 +133,7 @@ func (dm *DataManager) DeleteUser(name string) error {
 			return err
 		}
 
-		if err := os.WriteFile(usersFile, data, 0644); err != nil {
+		if err := os.WriteFile(dm.getFilePath(usersFile), data, 0644); err != nil {
 			return err
 		}
 	}
@@ -124,7 +147,7 @@ func (dm *DataManager) LoadScores() ([]ScoreEntry, error) {
 	defer dm.mu.Unlock()
 
 	var scores []ScoreEntry
-	data, err := os.ReadFile(scoresFile)
+	data, err := os.ReadFile(dm.getFilePath(scoresFile))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return scores, nil
@@ -165,7 +188,7 @@ func (dm *DataManager) AddScore(entry ScoreEntry) ([]ScoreEntry, error) {
 		return nil, err
 	}
 
-	if err := os.WriteFile(scoresFile, data, 0644); err != nil {
+	if err := os.WriteFile(dm.getFilePath(scoresFile), data, 0644); err != nil {
 		return nil, err
 	}
 
@@ -216,7 +239,7 @@ func (dm *DataManager) LoadAirports() ([]string, error) {
 	defer dm.mu.Unlock()
 
 	var airports []string
-	data, err := os.ReadFile(airportsFile)
+	data, err := os.ReadFile(dm.getFilePath(airportsFile))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return airports, nil
@@ -245,7 +268,7 @@ func (dm *DataManager) SaveAirport(city string) error {
 	defer dm.mu.Unlock()
 
 	var airports []string
-	data, err := os.ReadFile(airportsFile)
+	data, err := os.ReadFile(dm.getFilePath(airportsFile))
 	if err == nil {
 		json.Unmarshal(data, &airports)
 	}
@@ -267,7 +290,7 @@ func (dm *DataManager) SaveAirport(city string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(airportsFile, newData, 0644)
+		return os.WriteFile(dm.getFilePath(airportsFile), newData, 0644)
 	}
 
 	return nil
