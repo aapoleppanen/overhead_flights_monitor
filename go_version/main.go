@@ -26,8 +26,10 @@ const (
 	physicalHeight = 1280
 
 	// Game logic dimensions (Landscape)
-	logicalWidth  = 1280
-	logicalHeight = 720
+	// PERFORMANCE: 854x480 is a "safe mode" resolution (approx 1.5x scale)
+	// It balances readablity (UI isn't huge) with FPS.
+	logicalWidth  = 854
+	logicalHeight = 480
 
 	defaultZoom = 11
 
@@ -122,6 +124,9 @@ type Game struct {
 
 	// UI Elements (Simple rects for click detection)
 	buttons []Button
+
+	// reusable render object
+	op *ebiten.DrawImageOptions
 }
 
 type Button struct {
@@ -149,6 +154,7 @@ func NewGame(fc *FlightClient) *Game {
 			"ASDFGHJKL",
 			"ZXCVBNM-",
 		},
+		op: &ebiten.DrawImageOptions{},
 	}
 
 	// Load initial data
@@ -230,14 +236,20 @@ func (g *Game) getLogicalCursorPosition() (int, int) {
 		x, y = ebiten.CursorPosition()
 	}
 
+	// Calculate scale dynamically based on current resolution settings
+	// Physical Height (1280) corresponds to Logical Width (854)
+	scale := float64(physicalHeight) / float64(logicalWidth)
+
 	// Remap Logic:
-	// Physical X (0-720) becomes Game Y (0-720)
-	// Physical Y (0-1280) becomes Game X (0-1280)
+	// Physical X (0-720) becomes Game Y (0-480)
+	// Physical Y (0-1280) becomes Game X (0-854)
 
-	// GameX = PhysicalY
-	// GameY = ScreenWidth - PhysicalX (physicalWidth is 720)
+	// GameX = PhysicalY / Scale
+	gameX := int(float64(y) / scale)
+	// GameY = (ScreenWidth - PhysicalX) / Scale
+	gameY := int(float64(physicalWidth-x) / scale)
 
-	return y, physicalWidth - x
+	return gameX, gameY
 }
 
 func (g *Game) Update() error {
@@ -269,6 +281,11 @@ func (g *Game) Update() error {
 
 	// 1. Handle Pinch-to-Zoom (Two Fingers)
 	touchIDs := ebiten.AppendTouchIDs(nil)
+	// DEBUG: Ensure we reset pinch if fingers drop below 2
+	if len(touchIDs) < 2 {
+		g.lastPinchDist = 0
+	}
+
 	if !g.isKeyboardOpen && len(touchIDs) == 2 {
 		// Get raw physical positions of both fingers
 		x1, y1 := ebiten.TouchPosition(touchIDs[0])
@@ -364,6 +381,7 @@ func (g *Game) Update() error {
 	_, wheelDy := ebiten.Wheel()
 	if wheelDy != 0 {
 		g.camZoom += int(wheelDy)
+		// Clamp Zoom
 		if g.camZoom < 4 {
 			g.camZoom = 4
 		}
@@ -404,10 +422,11 @@ func (g *Game) checkUIClick(x, y int) bool {
 		}
 	}
 	// Also catch clicks on sidebars to prevent map panning through them
-	if g.selectedPlane != nil && x > logicalWidth-300 {
+	// Adjusted width for 854px screen (Sidebar is now 220px)
+	if g.selectedPlane != nil && x > logicalWidth-220 {
 		return true
 	}
-	if g.state == StateGamePlaying && x < 300 {
+	if g.state == StateGamePlaying && x < 220 {
 		return true
 	}
 	return false
@@ -502,14 +521,25 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// 2. Rotate 90 degrees (Pi/2 radians)
 	op.GeoM.Rotate(math.Pi / 2)
 
-	// 3. Move back to center of the destination screen
+	// 3. Scale up to fit physical screen
+	// Calculate scale: 1280 / 854 = ~1.5
+	scale := float64(physicalHeight) / float64(logicalWidth)
+	op.GeoM.Scale(scale, scale)
+
+	// 4. Move back to center of the destination screen
 	op.GeoM.Translate(float64(physicalWidth)/2, float64(physicalHeight)/2)
 
+	// Filter: Nearest for retro look/speed, or Linear for smooth
+	op.Filter = ebiten.FilterNearest
+
 	screen.DrawImage(g.offscreen, op)
+
+	// DEBUG: Draw touch count on top of everything to verify hardware support
+	// ebitenutil.DebugPrint(screen, fmt.Sprintf("FPS: %0.2f | Touches: %d", ebiten.ActualFPS(), len(ebiten.AppendTouchIDs(nil))))
 }
 
 func (g *Game) drawLogin(screen *ebiten.Image) {
-	g.buttons = []Button{}
+	g.buttons = g.buttons[:0]
 
 	title := "VANTAA FLIGHTRADAR24"
 	titleW := len(title) * 7 * 2 // approx scale 2
@@ -559,7 +589,7 @@ func (g *Game) drawLogin(screen *ebiten.Image) {
 			// Standard QWERTY: max 10 cols. 50px/key -> 500px wide.
 			kbW := 520
 			kbH := 250
-			kbY := 300
+			kbY := 225
 			kbX := (logicalWidth - kbW) / 2
 
 			// Background
@@ -650,7 +680,7 @@ func (g *Game) drawLogin(screen *ebiten.Image) {
 }
 
 func (g *Game) drawLeaderboard(screen *ebiten.Image) {
-	g.buttons = []Button{}
+	g.buttons = g.buttons[:0]
 
 	text.Draw(screen, "LEADERBOARD", basicfont.Face7x13, 20, 30, hexToColor(colAccent))
 
@@ -716,9 +746,18 @@ func (g *Game) drawMap(screen *ebiten.Image) {
 			if img != nil {
 				screenX := float64(x*tileSize) - minWX
 				screenY := float64(y*tileSize) - minWY
-				op := &ebiten.DrawImageOptions{}
-				op.GeoM.Translate(screenX, screenY)
-				screen.DrawImage(img, op)
+
+				// REUSE the op object instead of creating new
+				g.op.GeoM.Reset()
+				g.op.ColorScale.Reset()
+				g.op.Filter = ebiten.FilterNearest // Explicitly use nearest for speed
+
+				g.op.GeoM.Translate(screenX, screenY)
+				screen.DrawImage(img, g.op)
+
+				// op := &ebiten.DrawImageOptions{}
+				// op.GeoM.Translate(screenX, screenY)
+				// screen.DrawImage(img, op)
 			}
 		}
 	}
@@ -774,7 +813,7 @@ func (g *Game) drawPlanes(screen *ebiten.Image) {
 }
 
 func (g *Game) drawUI(screen *ebiten.Image) {
-	g.buttons = []Button{} // Reset buttons from previous frame
+	g.buttons = g.buttons[:0] // Reset buttons from previous frame
 
 	// Top Bar: User info
 	if g.state == StateMap {
@@ -786,27 +825,37 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 		g.addButton(logicalWidth-220, 10, 100, 30, "LOGOUT", func() { g.state = StateLogin; g.inputText = "" }, hexToColor(colDanger))
 	}
 
+	// DEBUG: Show Touch Count in UI (Top Left under User)
+	touchCount := len(ebiten.AppendTouchIDs(nil))
+	if touchCount > 0 {
+		text.Draw(screen, fmt.Sprintf("Touches: %d", touchCount), basicfont.Face7x13, 10, 40, color.White)
+	}
+
 	// Sidebar (Right) - Plane Info
 	if g.selectedPlane != nil {
-		g.drawPanel(screen, logicalWidth-300, 90, 280, 350, "FLIGHT INFO")
+		// Reduced width from 300 to 220, and adjusted X position
+		panelW := 220
+		panelX := logicalWidth - panelW - 10
+		g.drawPanel(screen, panelX, 90, panelW, 350, "FLIGHT INFO")
 
 		// Content
 		p := g.selectedPlane
 		y := 140
-		text.Draw(screen, p.Callsign, basicfont.Face7x13, logicalWidth-280, y, hexToColor(colAccent))
+		textW := panelX + 20
+		text.Draw(screen, p.Callsign, basicfont.Face7x13, textW, y, hexToColor(colAccent))
 		y += 30
-		text.Draw(screen, fmt.Sprintf("Alt: %d ft", p.AltitudeFt), basicfont.Face7x13, logicalWidth-280, y, color.White)
+		text.Draw(screen, fmt.Sprintf("Alt: %d ft", p.AltitudeFt), basicfont.Face7x13, textW, y, color.White)
 		y += 20
-		text.Draw(screen, fmt.Sprintf("Spd: %d kts", p.VelocityKts), basicfont.Face7x13, logicalWidth-280, y, color.White)
+		text.Draw(screen, fmt.Sprintf("Spd: %d kts", p.VelocityKts), basicfont.Face7x13, textW, y, color.White)
 		y += 20
-		text.Draw(screen, fmt.Sprintf("Lat/Lon: %.2f, %.2f", p.Lat, p.Lon), basicfont.Face7x13, logicalWidth-280, y, color.White)
+		text.Draw(screen, fmt.Sprintf("Lat/Lon: %.2f, %.2f", p.Lat, p.Lon), basicfont.Face7x13, textW, y, color.White)
 
 		y += 30
 		// Extended Details
 		if g.resolving {
-			text.Draw(screen, "Fetching details...", basicfont.Face7x13, logicalWidth-280, y, hexToColor(colTextMuted))
+			text.Draw(screen, "Fetching details...", basicfont.Face7x13, textW, y, hexToColor(colTextMuted))
 		} else if g.resolvedDetails != nil {
-			text.Draw(screen, "Model: "+truncate(g.resolvedDetails.Model, 35), basicfont.Face7x13, logicalWidth-280, y, color.White)
+			text.Draw(screen, "Model: "+truncate(g.resolvedDetails.Model, 25), basicfont.Face7x13, textW, y, color.White)
 
 			// Masking logic: If we are playing and this is the target, hide the answer
 			showOrigin := g.resolvedDetails.Origin
@@ -824,26 +873,31 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 			}
 
 			y += 20
-			text.Draw(screen, "Origin: "+truncate(showOrigin, 25), basicfont.Face7x13, logicalWidth-280, y, color.White)
+			text.Draw(screen, "Origin: "+truncate(showOrigin, 20), basicfont.Face7x13, textW, y, color.White)
 			y += 20
-			text.Draw(screen, "Dest: "+truncate(showDest, 25), basicfont.Face7x13, logicalWidth-280, y, color.White)
+			text.Draw(screen, "Dest: "+truncate(showDest, 20), basicfont.Face7x13, textW, y, color.White)
 		} else {
-			text.Draw(screen, "Details unavailable", basicfont.Face7x13, logicalWidth-280, y, hexToColor(colTextMuted))
+			text.Draw(screen, "Details unavailable", basicfont.Face7x13, textW, y, hexToColor(colTextMuted))
 		}
 
 		// Close Button
-		g.addButton(logicalWidth-50, 95, 30, 30, "X", func() { g.selectedPlane = nil }, color.RGBA{255, 255, 255, 50}, color.Black)
+		g.addButton(logicalWidth-40, 95, 30, 30, "X", func() { g.selectedPlane = nil }, color.RGBA{255, 255, 255, 50}, color.Black)
 	}
 
 	// Game Panel (Left)
 	if g.state == StateRoundSetup {
-		g.drawPanel(screen, 20, 90, 280, 150, fmt.Sprintf("ROUND %d/5", g.round))
+		g.drawPanel(screen, 20, 90, 220, 150, fmt.Sprintf("ROUND %d/5", g.round))
 		text.Draw(screen, "Tracking target...", basicfont.Face7x13, 40, 140, color.White)
 		text.Draw(screen, "Please wait", basicfont.Face7x13, 40, 160, hexToColor(colTextMuted))
 	} else if g.state == StateGamePlaying && g.targetPlane != nil {
-		g.drawPanel(screen, 20, 90, 280, 340, fmt.Sprintf("ROUND %d/5", g.round))
+		g.drawPanel(screen, 20, 90, 220, 340, fmt.Sprintf("ROUND %d/5", g.round))
 
-		text.Draw(screen, g.questionText, basicfont.Face7x13, 40, 140, color.White)
+		// Wrap question text if needed or truncate
+		qText := g.questionText
+		if len(qText) > 28 {
+			qText = qText[:28] + "..."
+		}
+		text.Draw(screen, qText, basicfont.Face7x13, 30, 140, color.White)
 
 		// Options
 		y := 170
@@ -861,12 +915,13 @@ func (g *Game) drawUI(screen *ebiten.Image) {
 
 			// Capture variable for closure
 			btnOpt := opt
-			g.addButton(40, y, 240, 40, opt, func() { g.guess(btnOpt) }, col, color.Black)
+			// Reduced button width to fit panel
+			g.addButton(30, y, 200, 40, truncate(opt, 25), func() { g.guess(btnOpt) }, col, color.Black)
 			y += 50
 		}
 
 		// Score
-		text.Draw(screen, fmt.Sprintf("Score: %d", g.score), basicfont.Face7x13, 40, y+20, hexToColor(colAccent))
+		text.Draw(screen, fmt.Sprintf("Score: %d", g.score), basicfont.Face7x13, 30, y+20, hexToColor(colAccent))
 
 		y += 40 // Add margin after the score
 

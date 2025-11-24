@@ -129,6 +129,13 @@ type Game struct {
 
 	// UI Elements
 	buttons []Button
+
+	// Rendering
+	renderTexture rl.RenderTexture2D
+	isPortrait    bool
+	destRect      rl.Rectangle
+	sourceRect    rl.Rectangle
+	origin        rl.Vector2
 }
 
 func NewGame(fc *FlightClient) *Game {
@@ -249,11 +256,99 @@ func (g *Game) Init() {
 	g.planeTex = createPlaneTexture()
 	// Set texture filter to Point for crisp text if using default font at integer scales
 	// rl.SetTextureFilter(rl.GetFontDefault().Texture, rl.TextureFilterPoint)
+
+	// Initialize Render Texture for virtual landscape resolution
+	g.renderTexture = rl.LoadRenderTexture(screenWidth, screenHeight) // 1280x720
+	rl.SetTextureFilter(g.renderTexture.Texture, rl.FilterBilinear)
+
+	// Check physical screen dimensions
+	pW := float32(rl.GetScreenWidth())
+	pH := float32(rl.GetScreenHeight())
+
+	fmt.Printf("Display initialized at: %.0fx%.0f\n", pW, pH)
+
+	// If physical width is less than height, assume Portrait display (e.g. 720x1280)
+	// We want to rotate our 1280x720 content to fit.
+	if pW < pH {
+		g.isPortrait = true
+		fmt.Println("Portrait mode detected. Enabling software rotation.")
+
+		// Source: The virtual 1280x720 texture (flipped vertically due to OpenGL coords)
+		g.sourceRect = rl.Rectangle{X: 0, Y: 0, Width: float32(screenWidth), Height: -float32(screenHeight)}
+
+		// Destination: The physical screen (e.g. 720x1280)
+		// We center the rotation point.
+		// If exact match (720x1280), we fill it.
+		g.destRect = rl.Rectangle{X: pW / 2, Y: pH / 2, Width: float32(screenWidth), Height: float32(screenHeight)}
+		g.origin = rl.Vector2{X: float32(screenWidth) / 2, Y: float32(screenHeight) / 2}
+	} else {
+		g.isPortrait = false
+		// Landscape - draw normally, maybe scale if resolution differs
+		g.sourceRect = rl.Rectangle{X: 0, Y: 0, Width: float32(screenWidth), Height: -float32(screenHeight)}
+		g.destRect = rl.Rectangle{X: 0, Y: 0, Width: pW, Height: pH}
+		g.origin = rl.Vector2{X: 0, Y: 0}
+	}
 }
 
 func (g *Game) Unload() {
+	rl.UnloadRenderTexture(g.renderTexture)
 	rl.UnloadTexture(g.planeTex)
 	g.tileLoader.Unload()
+}
+
+func (g *Game) getVirtualMousePosition() (int, int) {
+	mp := rl.GetMousePosition()
+	return g.transformInput(mp)
+}
+
+func (g *Game) getVirtualTouchPosition(index int) (int, int) {
+	tp := rl.GetTouchPosition(int32(index))
+	return g.transformInput(tp)
+}
+
+func (g *Game) transformInput(p rl.Vector2) (int, int) {
+	if !g.isPortrait {
+		// Map from physical to virtual (1280x720)
+		// If physical matches virtual, 1:1
+		pW := float32(rl.GetScreenWidth())
+		pH := float32(rl.GetScreenHeight())
+		if pW == 0 || pH == 0 {
+			return int(p.X), int(p.Y)
+		}
+		scaleX := float32(screenWidth) / pW
+		scaleY := float32(screenHeight) / pH
+		return int(p.X * scaleX), int(p.Y * scaleY)
+	}
+
+	// Portrait Mode (90 deg rotation)
+	// Screen (Physical) -> Virtual
+	// Virtual X = Screen Y
+	// Virtual Y = Screen Width - Screen X
+	// We need to account for scaling if physical dimensions aren't exactly 720x1280
+	// But assuming they are close or we want to fill.
+
+	// Map p (Screen Space) to 0..1 range first?
+	// Or just use the logic derived:
+	// Rotated 90 deg clockwise means:
+	// Dest Top-Right (Visual Top-Left) is Phys Top-Left? No.
+	// Visual Top-Left (0,0) is at Phys Top-Right (ScreenW, 0).
+	// Let's re-verify:
+	// Center (640, 360) -> Center (360, 640).
+	// Top-Left (0,0) -> Rotated 90 around Center -> (360 + (0-640)*0 - (0-360)*1, ...) ?
+	// Let's use the explicit mapping we found:
+	// V_x = Screen_y * (Virtual_W / Screen_H)
+	// V_y = (Screen_W - Screen_x) * (Virtual_H / Screen_W)
+
+	pW := float32(rl.GetScreenWidth())
+	pH := float32(rl.GetScreenHeight())
+
+	scaleX := float32(screenWidth) / pH  // 1280 / 1280 = 1
+	scaleY := float32(screenHeight) / pW // 720 / 720 = 1
+
+	vx := p.Y * scaleX
+	vy := (pW - p.X) * scaleY
+
+	return int(vx), int(vy)
 }
 
 func (g *Game) Update() {
@@ -280,10 +375,10 @@ func (g *Game) Update() {
 	// Raylib Touch
 	touchCount := rl.GetTouchPointCount()
 	if !g.isKeyboardOpen && touchCount == 2 {
-		t1 := rl.GetTouchPosition(0)
-		t2 := rl.GetTouchPosition(1)
+		t1x, t1y := g.getVirtualTouchPosition(0)
+		t2x, t2y := g.getVirtualTouchPosition(1)
 
-		dist := math.Sqrt(math.Pow(float64(t2.X-t1.X), 2) + math.Pow(float64(t2.Y-t1.Y), 2))
+		dist := math.Sqrt(math.Pow(float64(t2x-t1x), 2) + math.Pow(float64(t2y-t1y), 2))
 
 		if g.lastPinchDist > 0 {
 			threshold := 10.0
@@ -318,8 +413,8 @@ func (g *Game) Update() {
 
 	// Get position (Mouse or Touch 0)
 	// Raylib handles this unification mostly, but let's be explicit
-	mPos := rl.GetMousePosition()
-	mx, my := int(mPos.X), int(mPos.Y)
+	// Transform to virtual coordinates
+	mx, my := g.getVirtualMousePosition()
 
 	if isClick {
 		g.isDragging = true
@@ -473,7 +568,8 @@ func (g *Game) selectPlane(f *Flight) {
 }
 
 func (g *Game) Draw() {
-	rl.BeginDrawing()
+	// 1. Draw Game to Virtual Texture
+	rl.BeginTextureMode(g.renderTexture)
 	rl.ClearBackground(getRlColor(colBgDark))
 
 	if g.state == StateLogin {
@@ -489,6 +585,21 @@ func (g *Game) Draw() {
 
 	// Debug
 	rl.DrawFPS(10, screenHeight-20)
+	rl.EndTextureMode()
+
+	// 2. Draw Virtual Texture to Physical Screen
+	rl.BeginDrawing()
+	rl.ClearBackground(rl.Black)
+
+	if g.isPortrait {
+		// Rotated 90 degrees
+		rl.DrawTexturePro(g.renderTexture.Texture, g.sourceRect, g.destRect, g.origin, 90, rl.White)
+	} else {
+		// Normal draw (scaled if needed)
+		// If using DrawTexturePro with rotation 0, origin is usually 0,0 unless we want to center.
+		// My Init set origin to 0,0 for landscape.
+		rl.DrawTexturePro(g.renderTexture.Texture, g.sourceRect, g.destRect, g.origin, 0, rl.White)
+	}
 
 	rl.EndDrawing()
 }
@@ -655,7 +766,7 @@ func (g *Game) drawUI() {
 			rl.DrawText("Details unavailable", int32(txtX), int32(y), 16, getRlColor(colTextMuted))
 		}
 
-		g.addButton(screenWidth-50, 95, 30, 30, "X", func() { g.selectedPlane = nil }, rl.Color{255, 255, 255, 50}, rl.Black)
+		g.addButton(screenWidth-50, 95, 30, 30, "X", func() { g.selectedPlane = nil }, rl.Color{R: 255, G: 255, B: 255, A: 50}, rl.Black)
 	}
 
 	// Game Panel
@@ -733,7 +844,7 @@ func (g *Game) drawUI() {
 		rl.DrawRectangle(int32(b.X), int32(b.Y), int32(b.W), int32(b.H), b.Color)
 		// Centering text is a bit harder in Raylib without measuring,
 		// but simple approx or MeasureText works.
-		// Use font size 16 instead of 20 for smaller button text
+		// Use font size 14 instead of 20 for smaller button text
 		fontSize := int32(14)
 		tw := rl.MeasureText(b.Text, fontSize)
 		tx := b.X + (b.W-int(tw))/2
@@ -831,7 +942,7 @@ func (g *Game) drawLogin() {
 		rl.DrawRectangle(int32(b.X), int32(b.Y), int32(b.W), int32(b.H), b.Color)
 		// Centering text is a bit harder in Raylib without measuring,
 		// but simple approx or MeasureText works.
-		// Use font size 16 instead of 20 for smaller button text
+		// Use font size 14 instead of 20 for smaller button text
 		fontSize := int32(14)
 		tw := rl.MeasureText(b.Text, fontSize)
 		tx := b.X + (b.W-int(tw))/2
@@ -1038,7 +1149,12 @@ func main() {
 		}
 	}
 
-	rl.InitWindow(screenWidth, screenHeight, "Flight Monitor Raylib")
+	// disabled MSAA
+	// rl.SetConfigFlags(0)
+
+	// rl.InitWindow(screenWidth, screenHeight, "Flight Monitor Raylib")
+	rl.InitWindow(0, 0, "Flight Monitor Raylib")
+
 	rl.SetTargetFPS(60)
 
 	client := NewFlightClient()
